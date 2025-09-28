@@ -1,0 +1,72 @@
+{
+  "images": [
+    {
+      "image": "linuxserver/calibre",
+      "regex": "v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+",
+      "auto_update": true,
+      "container_name": "calibre"
+    },
+    {
+      "image": "linuxserver/sonarr",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+",
+      "auto_update": true,
+      "container_name": "sonarr"
+    },
+    {
+      "image": "linuxserver/plex",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+",
+      "auto_update": false,
+      "container_name": "plex"
+    },
+    {
+      "image": "postgres",
+      "regex": "[0-9]+\\.[0-9]+-alpine",
+      "auto_update": false,
+      "container_name": "postgres"
+    },
+    {
+      "image": "nginx",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine",
+      "auto_update": true,
+      "container_name": "nginx"
+    },
+    {
+      "image": "homeassistant/home-assistant",
+      "regex": "[0-9]{4}\\.[0-9]+\\.[0-9]+",
+      "auto_update": false,
+      "container_name": "homeassistant"
+    },
+    {
+      "image": "grafana/grafana",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+",
+      "auto_update": false,
+      "container_name": "grafana"
+    },
+    {
+      "image": "influxdb",
+      "regex": "[0-9]+\\.[0-9]+-alpine",
+      "auto_update": false,
+      "container_name": "influxdb"
+    }
+  ],
+  "notifications": {
+    "enabled": false,
+    "webhook_url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+    "email": {
+      "enabled": false,
+      "smtp_server": "smtp.gmail.com",
+      "smtp_port": 587,
+      "from": "your-email@gmail.com",
+      "to": "notify@example.com"
+    }
+  },
+  "update_schedule": {
+    "enabled": true,
+    "check_interval_seconds": 3600,
+    "update_window": {
+      "start_hour": 2,
+      "end_hour": 5
+    }
+  }
+}
+

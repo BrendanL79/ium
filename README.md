@@ -1,0 +1,340 @@
+# Docker Image Auto-Updater with Tag Tracking
+
+A robust, architecture-agnostic solution for automatically updating Docker container images while maintaining version-specific tags alongside the `latest` tag.
+
+## Features
+
+- **Smart Tag Tracking**: Identifies and saves the specific version tag that corresponds to `latest`
+- **Regex-based Matching**: Define custom patterns for version tags per image
+- **Architecture Agnostic**: Uses Docker Registry API instead of pulling images
+- **Selective Updates**: Choose which images to auto-update
+- **Container Management**: Optionally restart containers with new images
+- **State Persistence**: Tracks update history and current versions
+- **Multiple Run Modes**: One-shot, daemon, cron, or systemd service
+
+## How It Works
+
+1. **Registry API Integration**: Queries Docker Hub (or other registries) directly without pulling images
+2. **Digest Comparison**: Compares manifest digests to identify when `latest` points to a new version
+3. **Pattern Matching**: Uses your regex patterns to find the version-specific tag with the same digest
+4. **Smart Updates**: Only pulls and updates when actual changes are detected
+5. **State Management**: Maintains a state file to track current versions and update history
+
+## Installation
+
+### Quick Setup
+
+```bash
+# Clone or download the files
+mkdir docker-updater && cd docker-updater
+
+# Download the Python script
+curl -O https://raw.githubusercontent.com/your-repo/docker_updater.py
+
+# Download the setup script
+curl -O https://raw.githubusercontent.com/your-repo/setup.sh
+chmod +x setup.sh
+
+# Run interactive setup
+./setup.sh
+```
+
+### Manual Setup
+
+1. Install dependencies:
+```bash
+pip3 install requests
+```
+
+2. Create configuration file (`config.json`):
+```json
+{
+  "images": [
+    {
+      "image": "linuxserver/calibre",
+      "regex": "v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+",
+      "auto_update": true,
+      "container_name": "calibre"
+    }
+  ]
+}
+```
+
+3. Run the updater:
+```bash
+python3 docker_updater.py config.json
+```
+
+## Configuration
+
+### Image Configuration
+
+Each image in the configuration has the following options:
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `image` | string | Docker image name (e.g., "nginx", "user/repo") | Yes |
+| `regex` | string | Regex pattern to match version tags | Yes |
+| `auto_update` | boolean | Whether to automatically pull and update | No (default: false) |
+| `container_name` | string | Name of container to restart after update | No |
+
+### Common Regex Patterns
+
+Here are regex patterns for popular Docker images:
+
+```json
+{
+  "images": [
+    {
+      "comment": "LinuxServer.io images (e.g., v5.1.2-ls123)",
+      "image": "linuxserver/sonarr",
+      "regex": "v?[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?-ls[0-9]+"
+    },
+    {
+      "comment": "Alpine-based versions (e.g., 15.4-alpine)",
+      "image": "postgres",
+      "regex": "[0-9]+\\.[0-9]+-alpine"
+    },
+    {
+      "comment": "Semantic versioning (e.g., 1.21.6)",
+      "image": "nginx",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+"
+    },
+    {
+      "comment": "Date-based versions (e.g., 2024.1.5)",
+      "image": "homeassistant/home-assistant",
+      "regex": "[0-9]{4}\\.[0-9]+\\.[0-9]+"
+    },
+    {
+      "comment": "Git commit versions (e.g., 2.5.0-a1b2c3d)",
+      "image": "gitea/gitea",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-[a-f0-9]{7}"
+    },
+    {
+      "comment": "Build number versions (e.g., 8.6.1234)",
+      "image": "jenkins/jenkins",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]{4}"
+    },
+    {
+      "comment": "Ubuntu-based versions (e.g., 8-jdk-jammy)",
+      "image": "gradle",
+      "regex": "[0-9]+-jdk-[a-z]+"
+    }
+  ]
+}
+```
+
+## Usage
+
+### Command Line Options
+
+```bash
+python3 docker_updater.py config.json [options]
+
+Options:
+  --state FILE        Path to state file (default: docker_update_state.json)
+  --check-only        Only check for updates, don't apply them
+  --daemon            Run continuously, checking at intervals
+  --interval SECONDS  Check interval for daemon mode (default: 3600)
+```
+
+### Run Modes
+
+#### 1. One-shot Check
+```bash
+python3 docker_updater.py config.json --check-only
+```
+
+#### 2. One-shot Update
+```bash
+python3 docker_updater.py config.json
+```
+
+#### 3. Daemon Mode
+```bash
+python3 docker_updater.py config.json --daemon --interval 3600
+```
+
+#### 4. Docker Compose
+```bash
+docker-compose up -d
+```
+
+#### 5. Systemd Service
+```bash
+./setup.sh  # Choose option 7
+```
+
+#### 6. Cron Job
+```bash
+# Add to crontab for hourly checks
+0 * * * * /usr/bin/python3 /path/to/docker_updater.py /path/to/config.json
+```
+
+## Docker Compose Deployment
+
+Use the provided `docker-compose.yml` to run the updater as a container:
+
+```yaml
+version: '3.8'
+
+services:
+  docker-updater:
+    image: python:3.11-alpine
+    container_name: docker-updater
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker_updater.py:/app/docker_updater.py
+      - ./config.json:/app/config.json
+      - ./state:/app/state
+    working_dir: /app
+    environment:
+      - CHECK_INTERVAL=3600
+    command: >
+      sh -c "
+      apk add --no-cache docker-cli &&
+      pip install --no-cache-dir requests &&
+      python docker_updater.py config.json --state /app/state/docker_update_state.json --daemon --interval $${CHECK_INTERVAL}
+      "
+```
+
+## State File
+
+The updater maintains a state file with the following structure:
+
+```json
+{
+  "linuxserver/calibre": {
+    "tag": "v8.11.1-ls358",
+    "digest": "sha256:abc123...",
+    "last_updated": "2024-01-15T10:30:00"
+  }
+}
+```
+
+## Testing Regex Patterns
+
+Use the included setup script to test regex patterns:
+
+```bash
+./setup.sh
+# Choose option 3 (Test regex pattern)
+# Enter image name and pattern to test
+```
+
+Or test manually:
+```bash
+# Create a test config
+echo '{
+  "images": [{
+    "image": "nginx",
+    "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine"
+  }]
+}' > test.json
+
+# Run check
+python3 docker_updater.py test.json --check-only
+```
+
+## Architecture Support
+
+This solution is architecture-agnostic because it:
+- Uses Docker Registry API instead of pulling images
+- Compares manifest digests rather than image layers
+- Works with multi-arch images automatically
+- Doesn't require the Docker daemon to download images for checking
+
+## Security Considerations
+
+1. **Docker Socket Access**: The updater needs access to `/var/run/docker.sock` to manage containers
+2. **Registry Authentication**: Currently supports public registries; private registries need token configuration
+3. **Container Updates**: Be cautious with `auto_update: true` for production containers
+4. **State File**: Keep the state file secure as it tracks your infrastructure
+
+## Troubleshooting
+
+### Common Issues
+
+1. **"Could not get digest for image:latest"**
+   - Check if the image name is correct
+   - Verify network connectivity to Docker Hub
+   - For private registries, ensure authentication is configured
+
+2. **"No tag matching pattern found"**
+   - Verify your regex pattern matches the actual tags
+   - Use the test function to validate patterns
+   - Check available tags with: `docker run --rm regclient/regctl:latest tag ls IMAGE`
+
+3. **Container restart fails**
+   - Ensure the container name matches exactly
+   - Check that the updater has Docker socket permissions
+   - Verify the container exists: `docker ps -a`
+
+### Debug Mode
+
+Enable verbose output by modifying the Python script:
+```python
+# Add at the top of the script
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+## Advanced Features
+
+### Custom Registry Support
+
+For private or custom registries, modify the token and URL functions:
+
+```python
+def get_docker_token(self, image: str) -> Optional[str]:
+    # For private registry
+    if image.startswith("myregistry.com/"):
+        auth_url = f"https://myregistry.com/auth/token?..."
+        # Add authentication headers if needed
+```
+
+### Notification Integration
+
+Add webhook notifications for updates:
+
+```python
+def send_notification(self, update_info):
+    webhook_url = self.config.get('notifications', {}).get('webhook_url')
+    if webhook_url:
+        requests.post(webhook_url, json={
+            'text': f"Updated {update_info['image']} to {update_info['new_tag']}"
+        })
+```
+
+### Update Windows
+
+Restrict updates to specific time windows:
+
+```python
+from datetime import datetime
+
+def is_update_window(self):
+    now = datetime.now()
+    start_hour = self.config.get('update_window', {}).get('start_hour', 0)
+    end_hour = self.config.get('update_window', {}).get('end_hour', 24)
+    return start_hour <= now.hour < end_hour
+```
+
+## Contributing
+
+Feel free to submit issues, fork the repository, and create pull requests for any improvements.
+
+## License
+
+MIT License - See LICENSE file for details
+
+## Acknowledgments
+
+- Docker Registry API documentation
+- LinuxServer.io for consistent tagging patterns
+- The Docker community for standardizing version tags
+
+
+
+

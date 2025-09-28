@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  docker-updater:
+    image: python:3.11-alpine
+    container_name: docker-updater
+    restart: unless-stopped
+    volumes:
+      # Mount Docker socket to interact with Docker daemon
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount the updater script
+      - ./docker_updater.py:/app/docker_updater.py
+      # Mount configuration
+      - ./config.json:/app/config.json
+      # Persistent state storage
+      - ./state:/app/state
+    working_dir: /app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CHECK_INTERVAL=3600
+    command: >
+      sh -c "
+      apk add --no-cache docker-cli &&
+      pip install --no-cache-dir requests &&
+      python docker_updater.py config.json --state /app/state/docker_update_state.json --daemon --interval $${CHECK_INTERVAL}
+      "
+    networks:
+      - docker-updater-net
+    labels:
+      - "com.docker.updater.description=Automated Docker image updater with tag tracking"
+
+  # Alternative: Run as a cron job instead of daemon
+  docker-updater-cron:
+    image: python:3.11-alpine
+    container_name: docker-updater-cron
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker_updater.py:/app/docker_updater.py
+      - ./config.json:/app/config.json
+      - ./state:/app/state
+    working_dir: /app
+    environment:
+      - PYTHONUNBUFFERED=1
+    entrypoint: >
+      sh -c "
+      apk add --no-cache docker-cli dcron &&
+      pip install --no-cache-dir requests &&
+      echo '0 * * * * cd /app && python docker_updater.py config.json --state /app/state/docker_update_state.json' | crontab - &&
+      crond -f -l 2
+      "
+    networks:
+      - docker-updater-net
+    profiles:
+      - cron
+
+networks:
+  docker-updater-net:
+    driver: bridge
+
+# To use the cron version instead of the daemon:
+# docker-compose --profile cron up -d
+
