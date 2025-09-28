@@ -1,2 +1,6 @@
 Submitted to Claude Opus 4.1, 2025-09-28:
 I want to set up an auto-update mechanism for my Docker container images. But not simply grabbing "latest" at intervals. I also want to save, for each image, one of the other build tags that points to the same image as "latest". Each image will have an associated regex that defines the tag I want to save. For example, for the current "latest" of "linuxserver/calibre", the associated tag I would want is "v8.11.1-ls358", with a regex of "/v[0-9]\.[0-9]\.[0-9]-ls[0-9]/".  The server I'm doing this on is amd64-based but I would prefer an architecture-agnostic solution.
+
+looks like we still need a way to track the idea that I want a standard tag ("latest" for most but not all images) in addition to the regex-based tag
+
+

@@ -2,49 +2,78 @@
   "images": [
     {
       "image": "linuxserver/calibre",
+      "base_tag": "latest",
       "regex": "v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+",
       "auto_update": true,
       "container_name": "calibre"
     },
     {
       "image": "linuxserver/sonarr",
+      "base_tag": "latest",
       "regex": "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+",
       "auto_update": true,
       "container_name": "sonarr"
     },
     {
       "image": "linuxserver/plex",
+      "base_tag": "latest",
       "regex": "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+",
       "auto_update": false,
       "container_name": "plex"
     },
     {
       "image": "postgres",
-      "regex": "[0-9]+\\.[0-9]+-alpine",
+      "base_tag": "15",
+      "regex": "15\\.[0-9]+-alpine",
       "auto_update": false,
       "container_name": "postgres"
     },
     {
       "image": "nginx",
-      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine",
+      "base_tag": "mainline",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+",
       "auto_update": true,
       "container_name": "nginx"
     },
     {
+      "image": "node",
+      "base_tag": "lts",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine",
+      "auto_update": false,
+      "container_name": "node-app"
+    },
+    {
+      "image": "redis",
+      "base_tag": "7",
+      "regex": "7\\.[0-9]+\\.[0-9]+-alpine",
+      "auto_update": false,
+      "container_name": "redis"
+    },
+    {
+      "image": "mariadb",
+      "base_tag": "11",
+      "regex": "11\\.[0-9]+\\.[0-9]+",
+      "auto_update": false,
+      "container_name": "mariadb"
+    },
+    {
       "image": "homeassistant/home-assistant",
+      "base_tag": "stable",
       "regex": "[0-9]{4}\\.[0-9]+\\.[0-9]+",
       "auto_update": false,
       "container_name": "homeassistant"
     },
     {
       "image": "grafana/grafana",
+      "base_tag": "latest",
       "regex": "[0-9]+\\.[0-9]+\\.[0-9]+",
       "auto_update": false,
       "container_name": "grafana"
     },
     {
       "image": "influxdb",
-      "regex": "[0-9]+\\.[0-9]+-alpine",
+      "base_tag": "2",
+      "regex": "2\\.[0-9]+-alpine",
       "auto_update": false,
       "container_name": "influxdb"
     }

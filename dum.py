@@ -159,12 +159,13 @@ class DockerImageUpdater:
             print(f"Error getting tags for {image}: {e}")
             return []
             
-    def find_matching_tag(self, image: str, regex_pattern: str) -> Optional[Tuple[str, str]]:
+    def find_matching_tag(self, image: str, base_tag: str, regex_pattern: str) -> Optional[Tuple[str, str]]:
         """
-        Find a tag matching the regex pattern that has the same digest as 'latest'.
+        Find a tag matching the regex pattern that has the same digest as the base tag.
         
         Args:
             image: Image name
+            base_tag: Base tag to track (e.g., 'latest', 'stable', '14')
             regex_pattern: Regex pattern to match tags
             
         Returns:
@@ -175,10 +176,10 @@ class DockerImageUpdater:
         if not token:
             return None
             
-        # Get digest for 'latest' tag
-        latest_digest = self.get_manifest_digest(image, 'latest', token)
-        if not latest_digest:
-            print(f"Could not get digest for {image}:latest")
+        # Get digest for base tag
+        base_digest = self.get_manifest_digest(image, base_tag, token)
+        if not base_digest:
+            print(f"Could not get digest for {image}:{base_tag}")
             return None
             
         # Get all available tags
@@ -197,13 +198,13 @@ class DockerImageUpdater:
         # Find tags matching the pattern
         matching_tags = [tag for tag in all_tags if pattern.match(tag)]
         
-        # Find which matching tag has the same digest as 'latest'
+        # Find which matching tag has the same digest as base tag
         for tag in matching_tags:
             tag_digest = self.get_manifest_digest(image, tag, token)
-            if tag_digest == latest_digest:
-                return (tag, latest_digest)
+            if tag_digest == base_digest:
+                return (tag, base_digest)
                 
-        print(f"No tag matching pattern '{regex_pattern}' found with same digest as latest")
+        print(f"No tag matching pattern '{regex_pattern}' found with same digest as {base_tag}")
         return None
         
     def pull_image(self, image: str, tag: str) -> bool:
@@ -311,17 +312,18 @@ class DockerImageUpdater:
         for image_config in self.config.get('images', []):
             image = image_config['image']
             regex = image_config['regex']
+            base_tag = image_config.get('base_tag', 'latest')  # Default to 'latest' if not specified
             auto_update = image_config.get('auto_update', False)
             container_name = image_config.get('container_name')
             
-            print(f"\nChecking {image}...")
+            print(f"\nChecking {image}:{base_tag}...")
             
-            # Find matching tag for current latest
-            result = self.find_matching_tag(image, regex)
+            # Find matching tag for current base tag
+            result = self.find_matching_tag(image, base_tag, regex)
             
             if result:
                 matching_tag, digest = result
-                print(f"Latest tag corresponds to: {matching_tag}")
+                print(f"Base tag '{base_tag}' corresponds to: {matching_tag}")
                 print(f"Digest: {digest}")
                 
                 # Check if this is different from our saved state
@@ -333,23 +335,26 @@ class DockerImageUpdater:
                     print(f"UPDATE AVAILABLE: {saved_tag or 'unknown'} -> {matching_tag}")
                     updates_found.append({
                         'image': image,
+                        'base_tag': base_tag,
                         'old_tag': saved_tag,
                         'new_tag': matching_tag,
                         'digest': digest
                     })
                     
                     if auto_update:
-                        # Pull the new image
-                        if self.pull_image(image, 'latest'):
+                        # Pull the new image with base tag
+                        if self.pull_image(image, base_tag):
                             # Also pull the specific tag
                             self.pull_image(image, matching_tag)
                             
                             # Update container if specified
                             if container_name:
-                                self.update_container(container_name, image, matching_tag)
+                                # Use base_tag for container update
+                                self.update_container(container_name, image, base_tag)
                             
                             # Update state
                             self.state[image] = {
+                                'base_tag': base_tag,
                                 'tag': matching_tag,
                                 'digest': digest,
                                 'last_updated': datetime.now().isoformat()

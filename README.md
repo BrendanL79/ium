@@ -1,10 +1,11 @@
 # Docker Image Auto-Updater with Tag Tracking
 
-A robust, architecture-agnostic solution for automatically updating Docker container images while maintaining version-specific tags alongside the `latest` tag.
+A robust, architecture-agnostic solution for automatically updating Docker container images while maintaining version-specific tags alongside any base tag (latest, stable, lts, major versions, etc.).
 
 ## Features
 
-- **Smart Tag Tracking**: Identifies and saves the specific version tag that corresponds to `latest`
+- **Flexible Base Tag Tracking**: Track any base tag - not just "latest" (e.g., stable, mainline, lts, major versions)
+- **Smart Tag Resolution**: Identifies and saves the specific version tag that corresponds to your chosen base tag
 - **Regex-based Matching**: Define custom patterns for version tags per image
 - **Architecture Agnostic**: Uses Docker Registry API instead of pulling images
 - **Selective Updates**: Choose which images to auto-update
@@ -15,10 +16,22 @@ A robust, architecture-agnostic solution for automatically updating Docker conta
 ## How It Works
 
 1. **Registry API Integration**: Queries Docker Hub (or other registries) directly without pulling images
-2. **Digest Comparison**: Compares manifest digests to identify when `latest` points to a new version
-3. **Pattern Matching**: Uses your regex patterns to find the version-specific tag with the same digest
-4. **Smart Updates**: Only pulls and updates when actual changes are detected
-5. **State Management**: Maintains a state file to track current versions and update history
+2. **Base Tag Tracking**: Monitors your chosen base tag (latest, stable, lts, major version, etc.)
+3. **Digest Comparison**: Compares manifest digests to identify when the base tag points to a new version
+4. **Pattern Matching**: Uses your regex patterns to find the version-specific tag with the same digest
+5. **Smart Updates**: Only pulls and updates when actual changes are detected
+6. **State Management**: Maintains a state file to track current versions and update history
+
+### The Base Tag Concept
+
+The `base_tag` is the moving target you want to track:
+- **"latest"** - The default, tracks the newest release
+- **"15"** (PostgreSQL) - Tracks the latest patch within major version 15
+- **"stable"** (Home Assistant) - Tracks the stable channel
+- **"lts"** (Node.js) - Tracks the Long Term Support version
+- **"mainline"** (nginx) - Tracks the mainline development branch
+
+The regex pattern then finds the specific version tag (e.g., "15.4-alpine", "2024.1.5", "v8.11.1-ls358") that currently corresponds to your base tag.
 
 ## Installation
 
@@ -71,58 +84,136 @@ python3 docker_updater.py config.json
 
 Each image in the configuration has the following options:
 
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `image` | string | Docker image name (e.g., "nginx", "user/repo") | Yes |
-| `regex` | string | Regex pattern to match version tags | Yes |
-| `auto_update` | boolean | Whether to automatically pull and update | No (default: false) |
-| `container_name` | string | Name of container to restart after update | No |
+| Field | Type | Description | Required | Default |
+|-------|------|-------------|----------|---------|
+| `image` | string | Docker image name (e.g., "nginx", "user/repo") | Yes | - |
+| `base_tag` | string | Base tag to track (e.g., "latest", "stable", "15", "lts") | No | "latest" |
+| `regex` | string | Regex pattern to match version tags | Yes | - |
+| `auto_update` | boolean | Whether to automatically pull and update | No | false |
+| `container_name` | string | Name of container to restart after update | No | - |
 
-### Common Regex Patterns
+### Base Tag Examples
 
-Here are regex patterns for popular Docker images:
+The `base_tag` field allows you to track different release channels:
 
 ```json
 {
   "images": [
     {
-      "comment": "LinuxServer.io images (e.g., v5.1.2-ls123)",
-      "image": "linuxserver/sonarr",
-      "regex": "v?[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?-ls[0-9]+"
+      "comment": "Track 'latest' tag (default)",
+      "image": "linuxserver/calibre",
+      "base_tag": "latest",
+      "regex": "v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+"
     },
     {
-      "comment": "Alpine-based versions (e.g., 15.4-alpine)",
+      "comment": "Track PostgreSQL major version 15",
       "image": "postgres",
-      "regex": "[0-9]+\\.[0-9]+-alpine"
+      "base_tag": "15",
+      "regex": "15\\.[0-9]+-alpine"
     },
     {
-      "comment": "Semantic versioning (e.g., 1.21.6)",
+      "comment": "Track nginx mainline branch",
       "image": "nginx",
+      "base_tag": "mainline",
       "regex": "[0-9]+\\.[0-9]+\\.[0-9]+"
     },
     {
-      "comment": "Date-based versions (e.g., 2024.1.5)",
+      "comment": "Track Node.js LTS version",
+      "image": "node",
+      "base_tag": "lts",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine"
+    },
+    {
+      "comment": "Track Home Assistant stable channel",
       "image": "homeassistant/home-assistant",
+      "base_tag": "stable",
       "regex": "[0-9]{4}\\.[0-9]+\\.[0-9]+"
-    },
-    {
-      "comment": "Git commit versions (e.g., 2.5.0-a1b2c3d)",
-      "image": "gitea/gitea",
-      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-[a-f0-9]{7}"
-    },
-    {
-      "comment": "Build number versions (e.g., 8.6.1234)",
-      "image": "jenkins/jenkins",
-      "regex": "[0-9]+\\.[0-9]+\\.[0-9]{4}"
-    },
-    {
-      "comment": "Ubuntu-based versions (e.g., 8-jdk-jammy)",
-      "image": "gradle",
-      "regex": "[0-9]+-jdk-[a-z]+"
     }
   ]
 }
 ```
+
+### Common Regex Patterns
+
+Here are regex patterns for popular Docker images with their corresponding base tags:
+
+```json
+{
+  "images": [
+    {
+      "comment": "LinuxServer.io images tracking latest",
+      "image": "linuxserver/sonarr",
+      "base_tag": "latest",
+      "regex": "v?[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?-ls[0-9]+"
+    },
+    {
+      "comment": "PostgreSQL tracking major version 15",
+      "image": "postgres",
+      "base_tag": "15",
+      "regex": "15\\.[0-9]+-alpine"
+    },
+    {
+      "comment": "PostgreSQL tracking minor version 15.4",
+      "image": "postgres",
+      "base_tag": "15.4",
+      "regex": "15\\.4-alpine"
+    },
+    {
+      "comment": "nginx tracking mainline releases",
+      "image": "nginx",
+      "base_tag": "mainline",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+"
+    },
+    {
+      "comment": "nginx tracking stable releases",
+      "image": "nginx",
+      "base_tag": "stable",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine"
+    },
+    {
+      "comment": "Redis tracking major version 7",
+      "image": "redis",
+      "base_tag": "7",
+      "regex": "7\\.[0-9]+\\.[0-9]+-alpine"
+    },
+    {
+      "comment": "MariaDB tracking major version 11",
+      "image": "mariadb",
+      "base_tag": "11",
+      "regex": "11\\.[0-9]+\\.[0-9]+"
+    },
+    {
+      "comment": "Home Assistant tracking stable channel",
+      "image": "homeassistant/home-assistant",
+      "base_tag": "stable",
+      "regex": "[0-9]{4}\\.[0-9]+\\.[0-9]+"
+    },
+    {
+      "comment": "Node.js tracking LTS versions",
+      "image": "node",
+      "base_tag": "lts",
+      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine"
+    },
+    {
+      "comment": "Python tracking 3.11 branch",
+      "image": "python",
+      "base_tag": "3.11",
+      "regex": "3\\.11\\.[0-9]+-alpine"
+    }
+  ]
+}
+```
+
+#### Understanding Base Tags
+
+Different images use different tagging strategies:
+
+1. **"latest"** - Most common, tracks the newest stable release
+2. **Major version** (e.g., "15", "7") - Track updates within a major version
+3. **Release channels** (e.g., "stable", "mainline", "lts") - Track specific release types
+4. **Minor version** (e.g., "15.4", "3.11") - Track patch updates only
+
+Choose your `base_tag` based on your stability requirements:
 
 ## Usage
 
@@ -206,8 +297,15 @@ The updater maintains a state file with the following structure:
 ```json
 {
   "linuxserver/calibre": {
+    "base_tag": "latest",
     "tag": "v8.11.1-ls358",
     "digest": "sha256:abc123...",
+    "last_updated": "2024-01-15T10:30:00"
+  },
+  "postgres": {
+    "base_tag": "15",
+    "tag": "15.4-alpine",
+    "digest": "sha256:def456...",
     "last_updated": "2024-01-15T10:30:00"
   }
 }
@@ -229,7 +327,8 @@ Or test manually:
 echo '{
   "images": [{
     "image": "nginx",
-    "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine"
+    "base_tag": "mainline",
+    "regex": "[0-9]+\\.[0-9]+\\.[0-9]+"
   }]
 }' > test.json
 
@@ -334,7 +433,3 @@ MIT License - See LICENSE file for details
 - Docker Registry API documentation
 - LinuxServer.io for consistent tagging patterns
 - The Docker community for standardizing version tags
-
-
-
-

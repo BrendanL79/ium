@@ -90,6 +90,7 @@ create_sample_config() {
   "images": [
     {
       "image": "linuxserver/calibre",
+      "base_tag": "latest",
       "regex": "v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+",
       "auto_update": false,
       "container_name": "calibre"
@@ -104,6 +105,8 @@ EOF
 test_regex() {
     print_info "Testing regex pattern for an image..."
     read -p "Enter image name (e.g., linuxserver/calibre): " image
+    read -p "Enter base tag to track (e.g., latest, stable, 15): " base_tag
+    base_tag=${base_tag:-latest}
     read -p "Enter regex pattern (e.g., v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+): " regex
     
     # Create temporary test config
@@ -112,6 +115,7 @@ test_regex() {
   "images": [
     {
       "image": "$image",
+      "base_tag": "$base_tag",
       "regex": "$regex",
       "auto_update": false
     }
