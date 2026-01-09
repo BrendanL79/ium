@@ -20,16 +20,18 @@ import requests
 
 
 class DockerImageUpdater:
-    def __init__(self, config_file: str, state_file: str = "docker_update_state.json"):
+    def __init__(self, config_file: str, state_file: str = "docker_update_state.json", dry_run: bool = False):
         """
         Initialize the Docker Image Updater.
         
         Args:
             config_file: Path to JSON configuration file
             state_file: Path to store state between runs
+            dry_run: If True, only log what would be done without making changes
         """
         self.config_file = config_file
         self.state_file = state_file
+        self.dry_run = dry_run
         self.config = self.load_config()
         self.state = self.load_state()
         
@@ -219,6 +221,11 @@ class DockerImageUpdater:
             True if successful, False otherwise
         """
         full_image = f"{image}:{tag}"
+        
+        if self.dry_run:
+            print(f"[DRY RUN] Would pull {full_image}")
+            return True
+        
         print(f"Pulling {full_image}...")
         
         try:
@@ -247,6 +254,13 @@ class DockerImageUpdater:
             True if successful, False otherwise
         """
         full_image = f"{image}:{tag}"
+        
+        if self.dry_run:
+            print(f"[DRY RUN] Would update container {container_name} with image {full_image}")
+            print(f"[DRY RUN] Would stop container {container_name}")
+            print(f"[DRY RUN] Would remove old container {container_name}")
+            print(f"[DRY RUN] Would create new container {container_name} with image {full_image}")
+            return True
         
         try:
             # Get current container info
@@ -307,6 +321,10 @@ class DockerImageUpdater:
             
     def check_and_update(self):
         """Check for updates and apply them if configured."""
+        if self.dry_run:
+            print("=== DRY RUN MODE ===")
+            print("No actual changes will be made. Showing what would be done:\n")
+            
         updates_found = []
         
         for image_config in self.config.get('images', []):
@@ -352,18 +370,25 @@ class DockerImageUpdater:
                                 # Use base_tag for container update
                                 self.update_container(container_name, image, base_tag)
                             
-                            # Update state
-                            self.state[image] = {
-                                'base_tag': base_tag,
-                                'tag': matching_tag,
-                                'digest': digest,
-                                'last_updated': datetime.now().isoformat()
-                            }
+                            # Update state (only if not dry run)
+                            if not self.dry_run:
+                                self.state[image] = {
+                                    'base_tag': base_tag,
+                                    'tag': matching_tag,
+                                    'digest': digest,
+                                    'last_updated': datetime.now().isoformat()
+                                }
+                            else:
+                                print(f"[DRY RUN] Would update state for {image}")
+                                print(f"[DRY RUN] Would save: base_tag={base_tag}, tag={matching_tag}, digest={digest}")
                 else:
                     print("No update available")
                     
-        # Save state
-        self.save_state()
+        # Save state (only if not dry run)
+        if not self.dry_run:
+            self.save_state()
+        else:
+            print("[DRY RUN] Would save state to file")
         
         # Summary
         if updates_found:
@@ -387,11 +412,13 @@ def main():
                        help='Run continuously, checking at intervals')
     parser.add_argument('--interval', type=int, default=3600,
                        help='Check interval in seconds when running as daemon (default: 3600)')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Show what would be done without making any changes')
     
     args = parser.parse_args()
     
     # Load updater
-    updater = DockerImageUpdater(args.config, args.state)
+    updater = DockerImageUpdater(args.config, args.state, args.dry_run)
     
     if args.daemon:
         print(f"Running in daemon mode, checking every {args.interval} seconds")
