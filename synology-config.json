@@ -1,0 +1,75 @@
+{
+  "images": [
+    {
+      "image": "linuxserver/plex",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
+      "base_tag": "latest",
+      "auto_update": false,
+      "container_name": "plex",
+      "cleanup_old_images": true
+    },
+    {
+      "image": "linuxserver/sonarr",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
+      "base_tag": "latest",
+      "auto_update": false,
+      "container_name": "sonarr"
+    },
+    {
+      "image": "linuxserver/radarr",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
+      "base_tag": "latest",
+      "auto_update": false,
+      "container_name": "radarr"
+    },
+    {
+      "image": "linuxserver/sabnzbd",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
+      "base_tag": "latest",
+      "auto_update": false,
+      "container_name": "sabnzbd"
+    },
+    {
+      "image": "linuxserver/calibre",
+      "regex": "^v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
+      "base_tag": "latest",
+      "auto_update": false,
+      "container_name": "calibre"
+    },
+    {
+      "image": "linuxserver/calibre-web",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
+      "base_tag": "latest",
+      "auto_update": false,
+      "container_name": "calibre-web"
+    },
+    {
+      "image": "vaultwarden/server",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "base_tag": "latest",
+      "auto_update": false,
+      "container_name": "vaultwarden"
+    },
+    {
+      "image": "portainer/portainer-ce",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "base_tag": "latest",
+      "auto_update": false,
+      "container_name": "portainer"
+    },
+    {
+      "image": "postgres",
+      "regex": "^[0-9]+\\.[0-9]+$",
+      "base_tag": "14",
+      "auto_update": false,
+      "container_name": "postgres"
+    },
+    {
+      "image": "mariadb",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "base_tag": "10",
+      "auto_update": false,
+      "container_name": "mariadb"
+    }
+  ]
+}

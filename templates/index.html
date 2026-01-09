@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docker Image Updater</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Docker Image Updater</h1>
+            <div class="status-bar">
+                <span id="status-indicator" class="status-dot"></span>
+                <span id="status-text">Disconnected</span>
+                <span id="mode-indicator" class="mode"></span>
+                <span id="last-check"></span>
+            </div>
+        </header>
+
+        <div class="controls">
+            <button id="check-now" class="btn btn-primary">Check Now</button>
+            <button id="toggle-daemon" class="btn btn-secondary">Start Daemon</button>
+            <button id="refresh-config" class="btn btn-secondary">Refresh Config</button>
+            <label class="daemon-interval">
+                Interval (seconds):
+                <input type="number" id="daemon-interval" value="3600" min="60">
+            </label>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-button active" data-tab="updates">Updates</button>
+            <button class="tab-button" data-tab="config">Configuration</button>
+            <button class="tab-button" data-tab="state">State</button>
+            <button class="tab-button" data-tab="history">History</button>
+        </div>
+
+        <div class="tab-content">
+            <div id="updates" class="tab-pane active">
+                <h2>Available Updates</h2>
+                <div id="update-list" class="update-list">
+                    <p class="no-updates">No updates checked yet.</p>
+                </div>
+            </div>
+
+            <div id="config" class="tab-pane">
+                <h2>Configuration</h2>
+                <div id="config-editor">
+                    <textarea id="config-json" class="json-editor"></textarea>
+                    <button id="save-config" class="btn btn-primary">Save Configuration</button>
+                </div>
+            </div>
+
+            <div id="state" class="tab-pane">
+                <h2>Current State</h2>
+                <div id="state-view" class="state-view">
+                    <p>Loading state...</p>
+                </div>
+            </div>
+
+            <div id="history" class="tab-pane">
+                <h2>Update History</h2>
+                <div id="history-list" class="history-list">
+                    <p>Loading history...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="log-section">
+            <h3>Activity Log</h3>
+            <div id="log-output" class="log-output"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

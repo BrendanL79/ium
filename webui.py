@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""
+Web UI for Docker Image Auto-Updater
+"""
+
+import json
+import os
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+from flask import Flask, render_template, jsonify, request, Response
+from flask_socketio import SocketIO, emit
+import logging
+
+from dum import DockerImageUpdater, ImageState, DEFAULT_BASE_TAG
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Global variables
+updater: Optional[DockerImageUpdater] = None
+updater_thread: Optional[threading.Thread] = None
+last_check_time: Optional[datetime] = None
+last_updates: List[Dict[str, Any]] = []
+update_history: List[Dict[str, Any]] = []
+is_checking = False
+daemon_running = False
+daemon_interval = 3600
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def load_updater():
+    """Load or reload the updater instance."""
+    global updater
+    config_file = os.environ.get('CONFIG_FILE', '/config/config.json')
+    state_file = os.environ.get('STATE_FILE', '/state/docker_update_state.json')
+    dry_run = os.environ.get('DRY_RUN', 'true').lower() == 'true'
+    log_level = os.environ.get('LOG_LEVEL', 'INFO')
+    
+    try:
+        updater = DockerImageUpdater(config_file, state_file, dry_run, log_level)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to load updater: {e}")
+        return False
+
+
+def run_check():
+    """Run a single check cycle."""
+    global is_checking, last_check_time, last_updates
+    
+    if is_checking:
+        return
+        
+    is_checking = True
+    socketio.emit('status_update', {'checking': True})
+    
+    try:
+        if updater:
+            updates = updater.check_and_update()
+            last_updates = updates
+            last_check_time = datetime.now()
+            
+            # Add to history
+            if updates:
+                for update in updates:
+                    update_history.append({
+                        'timestamp': last_check_time.isoformat(),
+                        'image': update['image'],
+                        'old_tag': update['old_tag'],
+                        'new_tag': update['new_tag'],
+                        'applied': not updater.dry_run
+                    })
+                    
+            socketio.emit('check_complete', {
+                'updates': updates,
+                'timestamp': last_check_time.isoformat()
+            })
+    finally:
+        is_checking = False
+        socketio.emit('status_update', {'checking': False})
+
+
+def daemon_worker():
+    """Background worker for daemon mode."""
+    global daemon_running
+    
+    while daemon_running:
+        run_check()
+        # Sleep with interruption support
+        for _ in range(daemon_interval):
+            if not daemon_running:
+                break
+            time.sleep(1)
+
+
+@app.route('/')
+def index():
+    """Main web interface."""
+    return render_template('index.html')
+
+
+@app.route('/api/status')
+def api_status():
+    """Get current status."""
+    return jsonify({
+        'updater_loaded': updater is not None,
+        'dry_run': updater.dry_run if updater else True,
+        'is_checking': is_checking,
+        'daemon_running': daemon_running,
+        'daemon_interval': daemon_interval,
+        'last_check': last_check_time.isoformat() if last_check_time else None,
+        'config_file': updater.config_file.as_posix() if updater else None,
+        'state_file': updater.state_file.as_posix() if updater else None
+    })
+
+
+@app.route('/api/config')
+def api_config():
+    """Get current configuration."""
+    if not updater:
+        return jsonify({'error': 'Updater not loaded'}), 503
+        
+    return jsonify(updater.config)
+
+
+@app.route('/api/config', methods=['POST'])
+def api_update_config():
+    """Update configuration."""
+    if not updater:
+        return jsonify({'error': 'Updater not loaded'}), 503
+        
+    try:
+        new_config = request.json
+        # Validate and save new config
+        with open(updater.config_file, 'w') as f:
+            json.dump(new_config, f, indent=2)
+        
+        # Reload updater
+        if load_updater():
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({'error': 'Failed to reload updater'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/state')
+def api_state():
+    """Get current state."""
+    if not updater:
+        return jsonify({'error': 'Updater not loaded'}), 503
+        
+    state_dict = {
+        image: {
+            'base_tag': state.base_tag,
+            'tag': state.tag,
+            'digest': state.digest,
+            'last_updated': state.last_updated
+        }
+        for image, state in updater.state.items()
+    }
+    
+    return jsonify(state_dict)
+
+
+@app.route('/api/check', methods=['POST'])
+def api_check():
+    """Trigger a manual check."""
+    if is_checking:
+        return jsonify({'error': 'Check already in progress'}), 409
+        
+    if not updater:
+        if not load_updater():
+            return jsonify({'error': 'Failed to load updater'}), 503
+            
+    # Run check in background
+    threading.Thread(target=run_check).start()
+    
+    return jsonify({'status': 'started'})
+
+
+@app.route('/api/updates')
+def api_updates():
+    """Get last update results."""
+    return jsonify({
+        'last_check': last_check_time.isoformat() if last_check_time else None,
+        'updates': last_updates
+    })
+
+
+@app.route('/api/history')
+def api_history():
+    """Get update history."""
+    limit = request.args.get('limit', 50, type=int)
+    return jsonify(update_history[-limit:])
+
+
+@app.route('/api/daemon', methods=['POST'])
+def api_daemon():
+    """Start/stop daemon mode."""
+    global daemon_running, daemon_thread, daemon_interval
+    
+    action = request.json.get('action')
+    
+    if action == 'start':
+        if daemon_running:
+            return jsonify({'error': 'Daemon already running'}), 409
+            
+        if not updater:
+            if not load_updater():
+                return jsonify({'error': 'Failed to load updater'}), 503
+                
+        # Get interval from request or use default
+        daemon_interval = request.json.get('interval', 3600)
+        
+        daemon_running = True
+        daemon_thread = threading.Thread(target=daemon_worker)
+        daemon_thread.start()
+        
+        return jsonify({'status': 'started', 'interval': daemon_interval})
+        
+    elif action == 'stop':
+        if not daemon_running:
+            return jsonify({'error': 'Daemon not running'}), 409
+            
+        daemon_running = False
+        if daemon_thread:
+            daemon_thread.join(timeout=5)
+            
+        return jsonify({'status': 'stopped'})
+        
+    else:
+        return jsonify({'error': 'Invalid action'}), 400
+
+
+@app.route('/api/logs')
+def api_logs():
+    """Stream logs."""
+    def generate():
+        # Simple log streaming - in production you'd tail actual log files
+        log_file = Path('/var/log/docker-updater.log')
+        if log_file.exists():
+            with open(log_file, 'r') as f:
+                while True:
+                    line = f.readline()
+                    if line:
+                        yield f"data: {json.dumps({'log': line.strip()})}\n\n"
+                    else:
+                        time.sleep(0.5)
+                        
+    return Response(generate(), mimetype='text/event-stream')
+
+
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection."""
+    emit('connected', {'status': 'Connected to Docker Updater'})
+    
+    # Send current status
+    emit('status_update', {
+        'checking': is_checking,
+        'daemon_running': daemon_running,
+        'last_check': last_check_time.isoformat() if last_check_time else None
+    })
+
+
+if __name__ == '__main__':
+    # Load updater on startup
+    load_updater()
+    
+    # Start web server
+    socketio.run(app, host='0.0.0.0', port=5050, debug=False)
