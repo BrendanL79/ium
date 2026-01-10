@@ -114,14 +114,21 @@ function updateLastCheck(timestamp) {
 // Update daemon button state
 function updateDaemonButton() {
     const btn = document.getElementById('toggle-daemon');
+    const indicator = document.getElementById('daemon-indicator');
+    const statusText = document.getElementById('daemon-status-text');
+
     if (isDaemonRunning) {
         btn.textContent = 'Stop Daemon';
         btn.classList.add('btn-danger');
         btn.classList.remove('btn-secondary');
+        indicator.classList.add('connected');
+        statusText.textContent = 'Daemon: Running';
     } else {
         btn.textContent = 'Start Daemon';
         btn.classList.remove('btn-danger');
         btn.classList.add('btn-secondary');
+        indicator.classList.remove('connected');
+        statusText.textContent = 'Daemon: Stopped';
     }
 }
 
@@ -248,11 +255,16 @@ async function loadUpdates() {
     try {
         const response = await fetch('/api/updates');
         const data = await response.json();
-        
+
         if (data.updates && data.updates.length > 0) {
             displayUpdates(data.updates);
-        } else {
+        } else if (data.last_check) {
+            // Check was performed but no updates found
             displayNoUpdates();
+        } else {
+            // No check has been performed yet
+            document.getElementById('update-list').innerHTML =
+                '<p class="no-updates">No check performed yet. Click "Check Now" to scan for updates.</p>';
         }
     } catch (error) {
         addLog('Failed to load updates: ' + error, 'error');
