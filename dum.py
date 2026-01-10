@@ -174,14 +174,14 @@ class DockerImageUpdater:
             if IS_WINDOWS:
                 try:
                     msvcrt.locking(fp.fileno(), msvcrt.LK_UNLCK, 1)
-                except:
+                except (OSError, IOError):
                     pass
             else:
                 fcntl.flock(fp, fcntl.LOCK_UN)
             fp.close()
             try:
                 lock_file.unlink()
-            except:
+            except (OSError, FileNotFoundError):
                 pass
                 
     def _load_state(self) -> Dict[str, ImageState]:
@@ -750,7 +750,7 @@ class DockerImageUpdater:
                         capture_output=True,
                         check=False  # Don't fail if image is in use
                     )
-                except:
+                except (subprocess.SubprocessError, OSError):
                     pass
                     
         except subprocess.CalledProcessError as e:
