@@ -242,34 +242,40 @@ class DockerImageUpdater:
     def _parse_image_reference(self, image: str) -> Tuple[str, str, str]:
         """
         Parse image reference into registry, namespace, and repository.
-        
+
         Args:
             image: Image reference (e.g., 'ubuntu', 'linuxserver/calibre', 'gcr.io/project/image')
-            
+
         Returns:
             Tuple of (registry, namespace, repository)
         """
-        # Check if custom registry is specified
-        if '/' in image and any(image.startswith(prefix) for prefix in ['http://', 'https://', 'localhost']):
+        # Handle explicit protocol prefixes first
+        if image.startswith(('http://', 'https://')):
             parts = image.split('/', 1)
             registry = parts[0]
             remaining = parts[1] if len(parts) > 1 else ''
-        elif image.count('/') >= 2 and '.' in image.split('/')[0]:
-            # Likely a custom registry (e.g., gcr.io/project/image)
-            parts = image.split('/', 2)
-            registry = parts[0]
-            remaining = '/'.join(parts[1:])
         else:
-            registry = DEFAULT_REGISTRY
-            remaining = image
-            
-        # Parse namespace and repository
+            # Split once to check first component
+            parts = image.split('/', 1)
+            first_part = parts[0]
+
+            # Registry indicators: contains '.', is localhost, or has port ':'
+            if '.' in first_part or first_part == 'localhost' or ':' in first_part:
+                # First part is a custom registry
+                registry = first_part
+                remaining = parts[1] if len(parts) > 1 else ''
+            else:
+                # No custom registry detected, use default
+                registry = DEFAULT_REGISTRY
+                remaining = image
+
+        # Parse namespace and repository from remaining path
         if '/' in remaining:
             namespace, repo = remaining.split('/', 1)
         else:
             namespace = DEFAULT_NAMESPACE
             repo = remaining
-            
+
         return registry, namespace, repo
         
     def _get_docker_token(self, registry: str, namespace: str, repo: str) -> Optional[str]:
