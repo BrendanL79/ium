@@ -106,6 +106,7 @@ class DockerImageUpdater:
         self.logger = self._setup_logging(log_level)
         
         # Load configuration and state
+        self.compiled_patterns = {}  # Cache for compiled regex patterns
         self.config = self._load_config()
         self.state = self._load_state()
         
@@ -133,12 +134,13 @@ class DockerImageUpdater:
             # Validate against schema
             jsonschema.validate(config, CONFIG_SCHEMA)
             
-            # Validate regex patterns
+            # Validate and cache regex patterns
             for image_config in config.get('images', []):
+                regex_pattern = image_config['regex']
                 try:
-                    re.compile(image_config['regex'])
+                    self.compiled_patterns[regex_pattern] = re.compile(regex_pattern)
                 except re.error as e:
-                    raise ValueError(f"Invalid regex pattern '{image_config['regex']}': {e}")
+                    raise ValueError(f"Invalid regex pattern '{regex_pattern}': {e}")
                     
             return config
             
@@ -410,11 +412,10 @@ class DockerImageUpdater:
             self.logger.error(f"Could not get tags for {image}")
             return None
             
-        # Compile regex pattern
-        try:
-            pattern = re.compile(regex_pattern)
-        except re.error as e:
-            self.logger.error(f"Invalid regex pattern '{regex_pattern}': {e}")
+        # Get cached compiled pattern
+        pattern = self.compiled_patterns.get(regex_pattern)
+        if not pattern:
+            self.logger.error(f"Pattern not found in cache: '{regex_pattern}'")
             return None
             
         # Find tags matching the pattern
@@ -500,11 +501,10 @@ class DockerImageUpdater:
                     check=True
                 )
 
-                # Compile regex pattern
-                try:
-                    pattern = re.compile(regex)
-                except re.error as e:
-                    self.logger.debug(f"Invalid regex pattern '{regex}': {e}")
+                # Get cached compiled pattern
+                pattern = self.compiled_patterns.get(regex)
+                if not pattern:
+                    self.logger.debug(f"Pattern not found in cache: '{regex}'")
                     return None
 
                 # Check each image tag to find one that matches the regex
