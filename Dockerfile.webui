@@ -1,0 +1,34 @@
+FROM python:3.11-slim
+
+# Install required packages
+RUN apt-get update && apt-get install -y \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt requirements-webui.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-webui.txt
+
+# Copy the application files
+COPY dum.py webui.py ./
+COPY templates templates/
+COPY static static/
+
+# Create directories for config and state
+RUN mkdir -p /config /state /var/log
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV FLASK_APP=webui.py
+ENV CONFIG_FILE=/config/config.json
+ENV STATE_FILE=/state/docker_update_state.json
+ENV DRY_RUN=true
+
+# Expose web port
+EXPOSE 5050
+
+# Run the web UI with gunicorn
+CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "--bind", "0.0.0.0:5050", "webui:app"]
