@@ -26,8 +26,9 @@ import requests
 from urllib.parse import urlparse
 import jsonschema
 
-# Platform-specific imports
-if platform.system() != 'Windows':
+# Platform-specific imports and constant
+IS_WINDOWS = platform.system() == 'Windows'
+if not IS_WINDOWS:
     import fcntl
 else:
     import msvcrt
@@ -157,10 +158,7 @@ class DockerImageUpdater:
         lock_file = file_path.with_suffix('.lock')
         fp = open(lock_file, 'w')
         try:
-            if platform.system() != 'Windows':
-                # Unix-like systems
-                fcntl.flock(fp, fcntl.LOCK_EX)
-            else:
+            if IS_WINDOWS:
                 # Windows
                 while True:
                     try:
@@ -168,15 +166,18 @@ class DockerImageUpdater:
                         break
                     except IOError:
                         time.sleep(0.1)
+            else:
+                # Unix-like systems
+                fcntl.flock(fp, fcntl.LOCK_EX)
             yield
         finally:
-            if platform.system() != 'Windows':
-                fcntl.flock(fp, fcntl.LOCK_UN)
-            else:
+            if IS_WINDOWS:
                 try:
                     msvcrt.locking(fp.fileno(), msvcrt.LK_UNLCK, 1)
                 except:
                     pass
+            else:
+                fcntl.flock(fp, fcntl.LOCK_UN)
             fp.close()
             try:
                 lock_file.unlink()
