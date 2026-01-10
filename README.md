@@ -1,4 +1,4 @@
-# Docker Image Auto-Updater with Tag Tracking
+# Docker Update Manager (dum)
 
 A robust, architecture-agnostic solution for automatically updating Docker container images while maintaining version-specific tags alongside any base tag (latest, stable, lts, major versions, etc.).
 
@@ -6,14 +6,48 @@ A robust, architecture-agnostic solution for automatically updating Docker conta
 
 ## Features
 
+- **Web UI**: Browser-based monitoring and control with real-time updates
+- **Dry-run Mode**: Safe testing without making changes (enabled by default)
 - **Flexible Base Tag Tracking**: Track any base tag - not just "latest" (e.g., stable, mainline, lts, major versions)
 - **Smart Tag Resolution**: Identifies and saves the specific version tag that corresponds to your chosen base tag
 - **Regex-based Matching**: Define custom patterns for version tags per image
 - **Architecture Agnostic**: Uses Docker Registry API instead of pulling images
 - **Selective Updates**: Choose which images to auto-update
-- **Container Management**: Optionally restart containers with new images
+- **Container Management**: Preserves all container settings during updates with automatic rollback on failure
 - **State Persistence**: Tracks update history and current versions
-- **Multiple Run Modes**: One-shot, daemon, cron, or systemd service
+- **Current Version Detection**: Automatically detects what version is currently running
+- **Production Ready**: Gunicorn-based web server with WebSocket support
+
+## Quick Start
+
+### Using Docker Compose (Recommended)
+
+1. **Clone and configure:**
+```bash
+git clone https://github.com/BrendanL79/dum.git
+cd dum
+mkdir -p config state
+cp config_example.json config/config.json
+# Edit config/config.json with your images
+```
+
+2. **Choose your deployment mode:**
+
+```bash
+# Dry-run CLI daemon (safe testing, recommended first run)
+docker-compose up -d
+
+# Web UI with dry-run daemon
+docker-compose --profile webui up -d
+
+# Production CLI daemon (actually performs updates)
+docker-compose --profile prod up -d
+
+# Web UI with production daemon
+docker-compose --profile webui --profile prod up -d
+```
+
+3. **Access Web UI** (if enabled): http://localhost:5050
 
 ## How It Works
 
@@ -21,8 +55,9 @@ A robust, architecture-agnostic solution for automatically updating Docker conta
 2. **Base Tag Tracking**: Monitors your chosen base tag (latest, stable, lts, major version, etc.)
 3. **Digest Comparison**: Compares manifest digests to identify when the base tag points to a new version
 4. **Pattern Matching**: Uses your regex patterns to find the version-specific tag with the same digest
-5. **Smart Updates**: Only pulls and updates when actual changes are detected
-6. **State Management**: Maintains a state file to track current versions and update history
+5. **Current Version Detection**: Checks running containers to determine currently installed versions
+6. **Smart Updates**: Only reports/applies updates when actual changes are detected
+7. **State Management**: Maintains a state file to track current versions and update history
 
 ### The Base Tag Concept
 
@@ -30,59 +65,14 @@ The `base_tag` is the moving target you want to track:
 - **"latest"** - The default, tracks the newest release
 - **"15"** (PostgreSQL) - Tracks the latest patch within major version 15
 - **"stable"** (Home Assistant) - Tracks the stable channel
-- **"lts"** (Node.js) - Tracks the Long Term Support version
+- **"lts"** (Node.js, Portainer) - Tracks the Long Term Support version
 - **"mainline"** (nginx) - Tracks the mainline development branch
 
 The regex pattern then finds the specific version tag (e.g., "15.4-alpine", "2024.1.5", "v8.11.1-ls358") that currently corresponds to your base tag.
 
-## Installation
-
-### Quick Setup
-
-```bash
-# Clone or download the files
-mkdir docker-updater && cd docker-updater
-
-# Download the Python script
-curl -O https://raw.githubusercontent.com/your-repo/docker_updater.py
-
-# Download the setup script
-curl -O https://raw.githubusercontent.com/your-repo/setup.sh
-chmod +x setup.sh
-
-# Run interactive setup
-./setup.sh
-```
-
-### Manual Setup
-
-1. Install dependencies:
-```bash
-pip3 install requests
-```
-
-2. Create configuration file (`config.json`):
-```json
-{
-  "images": [
-    {
-      "image": "linuxserver/calibre",
-      "regex": "v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+",
-      "auto_update": true,
-      "container_name": "calibre"
-    }
-  ]
-}
-```
-
-3. Run the updater:
-```bash
-python3 docker_updater.py config.json
-```
-
 ## Configuration
 
-### Image Configuration
+### Image Configuration Fields
 
 Each image in the configuration has the following options:
 
@@ -92,44 +82,36 @@ Each image in the configuration has the following options:
 | `base_tag` | string | Base tag to track (e.g., "latest", "stable", "15", "lts") | No | "latest" |
 | `regex` | string | Regex pattern to match version tags | Yes | - |
 | `auto_update` | boolean | Whether to automatically pull and update | No | false |
-| `container_name` | string | Name of container to restart after update | No | - |
+| `container_name` | string | Name of container to update after pulling | No | - |
+| `cleanup_old_images` | boolean | Remove old images after successful update | No | false |
+| `registry` | string | Custom registry URL (for private registries) | No | - |
 
-### Base Tag Examples
-
-The `base_tag` field allows you to track different release channels:
+### Example Configuration
 
 ```json
 {
   "images": [
     {
-      "comment": "Track 'latest' tag (default)",
-      "image": "linuxserver/calibre",
+      "image": "linuxserver/sabnzbd",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
       "base_tag": "latest",
-      "regex": "v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+"
+      "auto_update": false,
+      "container_name": "sabnzbd",
+      "cleanup_old_images": true
     },
     {
-      "comment": "Track PostgreSQL major version 15",
+      "image": "portainer/portainer-ce",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "base_tag": "lts",
+      "auto_update": false,
+      "container_name": "portainer"
+    },
+    {
       "image": "postgres",
       "base_tag": "15",
-      "regex": "15\\.[0-9]+-alpine"
-    },
-    {
-      "comment": "Track nginx mainline branch",
-      "image": "nginx",
-      "base_tag": "mainline",
-      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+"
-    },
-    {
-      "comment": "Track Node.js LTS version",
-      "image": "node",
-      "base_tag": "lts",
-      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine"
-    },
-    {
-      "comment": "Track Home Assistant stable channel",
-      "image": "homeassistant/home-assistant",
-      "base_tag": "stable",
-      "regex": "[0-9]{4}\\.[0-9]+\\.[0-9]+"
+      "regex": "^15\\.[0-9]+$",
+      "auto_update": false,
+      "container_name": "postgres_db"
     }
   ]
 }
@@ -137,294 +119,457 @@ The `base_tag` field allows you to track different release channels:
 
 ### Common Regex Patterns
 
-Here are regex patterns for popular Docker images with their corresponding base tags:
+Here are regex patterns for popular Docker images:
 
 ```json
 {
   "images": [
     {
-      "comment": "LinuxServer.io images tracking latest",
+      "comment": "LinuxServer.io images (with version prefix)",
       "image": "linuxserver/sonarr",
       "base_tag": "latest",
-      "regex": "v?[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?-ls[0-9]+"
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$"
+    },
+    {
+      "comment": "LinuxServer.io images (without version prefix)",
+      "image": "linuxserver/calibre",
+      "base_tag": "latest",
+      "regex": "^v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$"
     },
     {
       "comment": "PostgreSQL tracking major version 15",
       "image": "postgres",
       "base_tag": "15",
-      "regex": "15\\.[0-9]+-alpine"
+      "regex": "^15\\.[0-9]+$"
     },
     {
-      "comment": "PostgreSQL tracking minor version 15.4",
+      "comment": "PostgreSQL Alpine variant",
       "image": "postgres",
-      "base_tag": "15.4",
-      "regex": "15\\.4-alpine"
+      "base_tag": "15-alpine",
+      "regex": "^15\\.[0-9]+-alpine$"
     },
     {
-      "comment": "nginx tracking mainline releases",
+      "comment": "nginx mainline releases",
       "image": "nginx",
       "base_tag": "mainline",
-      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+"
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     },
     {
-      "comment": "nginx tracking stable releases",
-      "image": "nginx",
-      "base_tag": "stable",
-      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine"
-    },
-    {
-      "comment": "Redis tracking major version 7",
+      "comment": "Redis major version 7",
       "image": "redis",
       "base_tag": "7",
-      "regex": "7\\.[0-9]+\\.[0-9]+-alpine"
+      "regex": "^7\\.[0-9]+\\.[0-9]+-alpine$"
     },
     {
-      "comment": "MariaDB tracking major version 11",
+      "comment": "MariaDB major version 11",
       "image": "mariadb",
       "base_tag": "11",
-      "regex": "11\\.[0-9]+\\.[0-9]+"
+      "regex": "^11\\.[0-9]+\\.[0-9]+$"
     },
     {
-      "comment": "Home Assistant tracking stable channel",
+      "comment": "Home Assistant stable channel",
       "image": "homeassistant/home-assistant",
       "base_tag": "stable",
-      "regex": "[0-9]{4}\\.[0-9]+\\.[0-9]+"
+      "regex": "^[0-9]{4}\\.[0-9]+\\.[0-9]+$"
     },
     {
-      "comment": "Node.js tracking LTS versions",
+      "comment": "Node.js LTS versions",
       "image": "node",
       "base_tag": "lts",
-      "regex": "[0-9]+\\.[0-9]+\\.[0-9]+-alpine"
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+-alpine$"
     },
     {
-      "comment": "Python tracking 3.11 branch",
+      "comment": "Python 3.11 branch",
       "image": "python",
       "base_tag": "3.11",
-      "regex": "3\\.11\\.[0-9]+-alpine"
+      "regex": "^3\\.11\\.[0-9]+-alpine$"
+    },
+    {
+      "comment": "Portainer LTS",
+      "image": "portainer/portainer-ce",
+      "base_tag": "lts",
+      "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     }
   ]
 }
 ```
 
-#### Understanding Base Tags
+**Regex Tips:**
+- Use `^` and `$` anchors to match the entire tag
+- Escape dots with `\\` (e.g., `\\.` for literal dots)
+- Test patterns before deploying with dry-run mode
 
-Different images use different tagging strategies:
+## Deployment Modes
 
-1. **"latest"** - Most common, tracks the newest stable release
-2. **Major version** (e.g., "15", "7") - Track updates within a major version
-3. **Release channels** (e.g., "stable", "mainline", "lts") - Track specific release types
-4. **Minor version** (e.g., "15.4", "3.11") - Track patch updates only
-
-Choose your `base_tag` based on your stability requirements:
-
-## Usage
-
-### Command Line Options
-
+### 1. Web UI with Dry-run (Recommended)
 ```bash
-python3 docker_updater.py config.json [options]
-
-Options:
-  --state FILE        Path to state file (default: docker_update_state.json)
-  --check-only        Only check for updates, don't apply them
-  --daemon            Run continuously, checking at intervals
-  --interval SECONDS  Check interval for daemon mode (default: 3600)
+docker-compose --profile webui up -d
 ```
+- Web interface at http://localhost:5050
+- Real-time monitoring and control
+- Manual check triggering
+- Configuration editor
+- Update history
+- Dry-run mode (safe - no actual changes)
 
-### Run Modes
+**Features:**
+- Visual status indicators
+- WebSocket real-time updates
+- Daemon control (start/stop)
+- Log viewer
+- Configuration validation
 
-#### 1. One-shot Check
-```bash
-python3 docker_updater.py config.json --check-only
-```
-
-#### 2. One-shot Update
-```bash
-python3 docker_updater.py config.json
-```
-
-#### 3. Daemon Mode
-```bash
-python3 docker_updater.py config.json --daemon --interval 3600
-```
-
-#### 4. Docker Compose
+### 2. CLI Daemon - Dry-run (Testing)
 ```bash
 docker-compose up -d
 ```
+- Runs in dry-run mode (safe)
+- Logs what would be updated without making changes
+- Hourly checks by default (configurable)
+- Good for testing patterns and configuration
 
-#### 5. Systemd Service
+### 3. CLI Daemon - Production
 ```bash
-./setup.sh  # Choose option 7
+docker-compose --profile prod up -d
 ```
+- Actually performs updates when `auto_update: true`
+- Use with caution
+- Monitor logs: `docker logs -f dum-prod`
 
-#### 6. Cron Job
+### 4. Web UI with Production Daemon
 ```bash
-# Add to crontab for hourly checks
-0 * * * * /usr/bin/python3 /path/to/docker_updater.py /path/to/config.json
+docker-compose --profile webui --profile prod up -d
+```
+- Web interface for monitoring
+- Production daemon for automatic updates
+- Full control and visibility
+- Recommended for production deployments
+
+### 5. Standalone CLI
+```bash
+python dum.py config/config.json [options]
 ```
 
-## Docker Compose Deployment
+**Options:**
+- `--dry-run` - Don't make actual changes (recommended for testing)
+- `--daemon` - Run continuously
+- `--interval SECONDS` - Check interval (default: 3600)
+- `--log-level LEVEL` - DEBUG, INFO, WARNING, ERROR (default: INFO)
+- `--state FILE` - State file path
 
-Use the provided `docker-compose.yml` to run the updater as a container:
+## Docker Compose Services
 
-```yaml
-version: '3.8'
+The docker-compose.yml provides three services:
 
-services:
-  docker-updater:
-    image: python:3.11-alpine
-    container_name: docker-updater
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./docker_updater.py:/app/docker_updater.py
-      - ./config.json:/app/config.json
-      - ./state:/app/state
-    working_dir: /app
-    environment:
-      - CHECK_INTERVAL=3600
-    command: >
-      sh -c "
-      apk add --no-cache docker-cli &&
-      pip install --no-cache-dir requests &&
-      python docker_updater.py config.json --state /app/state/docker_update_state.json --daemon --interval $${CHECK_INTERVAL}
-      "
-```
+| Service | Description | Profile | Default |
+|---------|-------------|---------|---------|
+| `dum` | CLI daemon in dry-run mode | (default) | Runs by default |
+| `dum-prod` | CLI daemon in production mode | `prod` | Opt-in |
+| `dum-webui` | Web UI (dry-run by default) | `webui` | Opt-in |
+
+**Network:** All services share the `dum-net` network
+
+**Volumes:**
+- `./config:/config` - Configuration files
+- `./state:/state` - State tracking
+- `/var/run/docker.sock:/var/run/docker.sock` - Docker access (read-only for dry-run)
+
+## Environment Variables
+
+Configure via docker-compose.yml or environment:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CONFIG_FILE` | Path to config JSON | `/config/config.json` |
+| `STATE_FILE` | Path to state JSON | `/state/docker_update_state.json` |
+| `DRY_RUN` | Enable dry-run mode | `true` |
+| `LOG_LEVEL` | Logging verbosity | `INFO` |
+| `CHECK_INTERVAL` | Seconds between checks | `3600` |
+| `SECRET_KEY` | Flask secret key (webui) | `dev-secret-key-change-in-production` |
 
 ## State File
 
-The updater maintains a state file with the following structure:
+The updater maintains a state file to track versions:
 
 ```json
 {
-  "linuxserver/calibre": {
+  "linuxserver/sabnzbd": {
     "base_tag": "latest",
-    "tag": "v8.11.1-ls358",
-    "digest": "sha256:abc123...",
-    "last_updated": "2024-01-15T10:30:00"
+    "tag": "4.5.5-ls239",
+    "digest": "sha256:07a76f30...",
+    "last_updated": "2026-01-10T18:31:19.476000"
   },
-  "postgres": {
-    "base_tag": "15",
-    "tag": "15.4-alpine",
-    "digest": "sha256:def456...",
-    "last_updated": "2024-01-15T10:30:00"
+  "portainer/portainer-ce": {
+    "base_tag": "lts",
+    "tag": "2.33.6",
+    "digest": "sha256:3d8e3d85...",
+    "last_updated": "2026-01-10T18:31:32.173000"
   }
 }
 ```
 
-## Testing Regex Patterns
-
-Use the included setup script to test regex patterns:
-
-```bash
-./setup.sh
-# Choose option 3 (Test regex pattern)
-# Enter image name and pattern to test
-```
-
-Or test manually:
-```bash
-# Create a test config
-echo '{
-  "images": [{
-    "image": "nginx",
-    "base_tag": "mainline",
-    "regex": "[0-9]+\\.[0-9]+\\.[0-9]+"
-  }]
-}' > test.json
-
-# Run check
-python3 docker_updater.py test.json --check-only
-```
+This file is automatically created and updated. Do not edit manually.
 
 ## Architecture Support
 
 This solution is architecture-agnostic because it:
 - Uses Docker Registry API instead of pulling images
 - Compares manifest digests rather than image layers
-- Works with multi-arch images automatically
+- Works with multi-arch images automatically via manifest lists
 - Doesn't require the Docker daemon to download images for checking
+- Detects running container versions from local image metadata
 
 ## Security Considerations
 
-1. **Docker Socket Access**: The updater needs access to `/var/run/docker.sock` to manage containers
-2. **Registry Authentication**: Currently supports public registries; private registries need token configuration
-3. **Container Updates**: Be cautious with `auto_update: true` for production containers
-4. **State File**: Keep the state file secure as it tracks your infrastructure
+### Docker Socket Access
+The updater needs access to `/var/run/docker.sock` to:
+- Query running containers
+- Pull new images (when not in dry-run)
+- Restart containers (when `container_name` specified)
+
+**Dry-run mode** mounts the socket as read-only (`:ro`) for safety.
+
+**Production mode** requires write access to perform updates.
+
+### Web UI Security
+- Default `SECRET_KEY` should be changed for production
+- No authentication built-in - use reverse proxy with auth if exposing publicly
+- Runs on port 5050 by default (change in docker-compose.yml)
+
+### Best Practices
+1. **Always test with dry-run first**
+2. **Start with `auto_update: false`** and review updates manually
+3. **Use specific base tags** (e.g., `15` not `latest`) for critical services
+4. **Enable `cleanup_old_images`** to prevent disk space issues
+5. **Monitor logs** for failed updates
+6. **Keep state file backed up** to track update history
+
+## Container Update Process
+
+When `auto_update: true` and an update is detected:
+
+1. **Pull** new image with base tag and version tag
+2. **Inspect** running container to get full configuration
+3. **Stop** running container
+4. **Rename** old container as backup (with timestamp)
+5. **Create** new container with identical settings
+6. **Start** new container
+7. **Verify** new container started successfully
+8. **Remove** old container backup
+9. **Optional:** Cleanup old images if `cleanup_old_images: true`
+
+**On failure:** Automatically rolls back by:
+- Renaming backup container to original name
+- Starting the old container
+- Logging the error
+
+**Settings preserved:**
+- Environment variables
+- Volumes
+- Networks
+- Port mappings
+- Restart policy
+- Labels
+- All other Docker configuration
+
+## Web UI Guide
+
+### Dashboard Tab
+- **Status Indicator**: Shows connection state and checking status
+- **Mode Indicator**: DRY RUN MODE or PRODUCTION MODE
+- **Daemon Status**: Shows if daemon is running or stopped
+- **Last Check**: Timestamp of most recent check
+- **Check Now**: Manually trigger an update check
+- **Start/Stop Daemon**: Control the WebUI-managed daemon
+
+### Updates Display
+Shows one of:
+- **"No check performed yet"** - Initial state
+- **"All images are up to date!"** - After check with no updates
+- **Update list** - Shows available updates with old → new version
+
+### Configuration Tab
+- Edit configuration JSON directly
+- Syntax validation before saving
+- Refresh from file
+- Save changes (triggers updater reload)
+
+### History Tab
+- View past update checks
+- Shows timestamp and results
+- Includes both successful updates and checks with no updates
+
+### Logs
+- Real-time log output
+- Color-coded by severity (info, warning, error)
+- Auto-scrolls to newest entries
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **"Could not get digest for image:latest"**
-   - Check if the image name is correct
-   - Verify network connectivity to Docker Hub
-   - For private registries, ensure authentication is configured
+**1. "No check performed yet" persists**
+- Click "Check Now" to trigger first check
+- Verify containers are running: `docker ps --filter "name=dum"`
+- Check logs: `docker logs dum-webui`
 
-2. **"No tag matching pattern found"**
-   - Verify your regex pattern matches the actual tags
-   - Use the test function to validate patterns
-   - Check available tags with: `docker run --rm regclient/regctl:latest tag ls IMAGE`
+**2. "No tag matching pattern found"**
+- Verify regex pattern matches actual tags
+- Check available tags: `curl https://registry.hub.docker.com/v2/repositories/[image]/tags`
+- Use dry-run mode to test patterns
+- Remember to escape backslashes in JSON: `\\.` for literal dot
 
-3. **Container restart fails**
-   - Ensure the container name matches exactly
-   - Check that the updater has Docker socket permissions
-   - Verify the container exists: `docker ps -a`
+**3. "Container not found" or "unknown" version**
+- Ensure `container_name` matches exactly: `docker ps --format '{{.Names}}'`
+- Container must be running to detect current version
+- Check container uses the image specified in config
+
+**4. Web UI shows "Disconnected"**
+- Check dum-webui container is running
+- Verify port 5050 is accessible
+- Check firewall rules
+- Review webui logs: `docker logs dum-webui`
+
+**5. Updates not applying in production mode**
+- Verify `auto_update: true` in config
+- Check logs for errors
+- Ensure Docker socket has write access
+- Confirm not running in dry-run mode
 
 ### Debug Mode
 
-Enable verbose output by modifying the Python script:
-```python
-# Add at the top of the script
-import logging
-logging.basicConfig(level=logging.DEBUG)
+Enable verbose logging:
+
+```bash
+# Via docker-compose.yml
+environment:
+  - LOG_LEVEL=DEBUG
+
+# Via CLI
+python dum.py config.json --log-level DEBUG
 ```
 
-## Advanced Features
+View logs:
+```bash
+# CLI daemon
+docker logs -f dum
+
+# Web UI
+docker logs -f dum-webui
+
+# Production daemon
+docker logs -f dum-prod
+```
+
+### Testing Regex Patterns
+
+1. Create test configuration with one image
+2. Run in dry-run mode: `docker-compose up -d`
+3. Check logs: `docker logs dum`
+4. Look for "Base tag corresponds to:" message
+5. Iterate on regex pattern until correct tag is matched
+
+## Advanced Usage
 
 ### Custom Registry Support
 
-For private or custom registries, modify the token and URL functions:
+For private registries, add the `registry` field:
 
-```python
-def get_docker_token(self, image: str) -> Optional[str]:
-    # For private registry
-    if image.startswith("myregistry.com/"):
-        auth_url = f"https://myregistry.com/auth/token?..."
-        # Add authentication headers if needed
+```json
+{
+  "image": "myregistry.com/myapp",
+  "registry": "myregistry.com",
+  "regex": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+  "base_tag": "latest"
+}
+```
+
+**Note:** Authentication for private registries currently requires extending the code.
+
+### Multiple Configuration Files
+
+Run multiple instances with different configs:
+
+```bash
+# In docker-compose.yml, duplicate services with different config mounts
+services:
+  dum-critical:
+    volumes:
+      - ./config/critical.json:/config/config.json
+      - ./state/critical:/state
+
+  dum-experimental:
+    volumes:
+      - ./config/experimental.json:/config/config.json
+      - ./state/experimental:/state
 ```
 
 ### Notification Integration
 
-Add webhook notifications for updates:
+Monitor the state file or logs to trigger notifications:
 
-```python
-def send_notification(self, update_info):
-    webhook_url = self.config.get('notifications', {}).get('webhook_url')
-    if webhook_url:
-        requests.post(webhook_url, json={
-            'text': f"Updated {update_info['image']} to {update_info['new_tag']}"
-        })
+```bash
+# Watch for state changes
+watch -n 60 'cat state/docker_update_state.json | jq'
+
+# Parse logs for updates
+docker logs dum 2>&1 | grep "UPDATE AVAILABLE"
 ```
 
-### Update Windows
+## NAS Deployment
 
-Restrict updates to specific time windows:
+See `nas-setup.md` for detailed instructions on deploying to Synology or QNAP NAS devices via:
+- Container Manager UI
+- Portainer
+- SSH/Docker CLI
 
-```python
-from datetime import datetime
+Key considerations:
+- Mount paths must be absolute
+- `/var/run/docker.sock` location may vary
+- Resource limits may be needed
 
-def is_update_window(self):
-    now = datetime.now()
-    start_hour = self.config.get('update_window', {}).get('start_hour', 0)
-    end_hour = self.config.get('update_window', {}).get('end_hour', 24)
-    return start_hour <= now.hour < end_hour
+## Project Structure
+
+```
+dum/
+├── dum.py                      # Main updater script
+├── webui.py                    # Web UI server
+├── Dockerfile                  # CLI daemon image
+├── Dockerfile.webui            # Web UI image
+├── docker-compose.yml          # Multi-mode deployment
+├── requirements.txt            # Python dependencies (core)
+├── requirements-webui.txt      # Python dependencies (webui)
+├── config_example.json         # Example configuration
+├── templates/                  # Web UI HTML templates
+│   └── index.html
+├── static/                     # Web UI static assets
+│   ├── css/
+│   └── js/
+├── config/                     # Your configuration (gitignored)
+│   └── config.json
+├── state/                      # Runtime state (gitignored)
+│   └── docker_update_state.json
+└── README.md
 ```
 
 ## Contributing
 
-Feel free to submit issues, fork the repository, and create pull requests for any improvements.
+Contributions welcome! Please:
+1. Test changes with dry-run mode first
+2. Update documentation for new features
+3. Follow existing code style
+4. Add examples for new configuration options
+
+## Roadmap
+
+Potential future enhancements:
+- Authentication for Web UI
+- Email/webhook notifications
+- Rollback functionality via Web UI
+- Update scheduling/maintenance windows
+- Multi-architecture image selection
+- Private registry authentication UI
+- Update approval workflow
 
 ## License
 
@@ -432,6 +577,8 @@ MIT License - See LICENSE file for details
 
 ## Acknowledgments
 
+- Initial codebase generated by Claude Opus 4.1 (commit bebfe84)
+- Enhancements and Web UI by Claude Opus 4.5
 - Docker Registry API documentation
 - LinuxServer.io for consistent tagging patterns
 - The Docker community for standardizing version tags
