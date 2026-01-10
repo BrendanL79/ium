@@ -271,9 +271,9 @@ def handle_connect():
     })
 
 
+# Load updater on startup (runs when gunicorn imports this module)
+load_updater()
+
 if __name__ == '__main__':
-    # Load updater on startup
-    load_updater()
-    
-    # Start web server
-    socketio.run(app, host='0.0.0.0', port=5050, debug=False)
+    # For local development only
+    socketio.run(app, host='0.0.0.0', port=5050, debug=True)
