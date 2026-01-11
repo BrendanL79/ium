@@ -270,6 +270,14 @@ function createImageCard(config, index, isNew = false) {
                     <span>Cleanup old images</span>
                 </label>
             </div>
+
+            <div class="form-group keep-versions-group">
+                <label>Keep Versions</label>
+                <input type="number" class="form-input form-input-small" name="keep_versions"
+                       value="${config.keep_versions || 3}"
+                       min="1" max="99">
+                <span class="field-hint">Number of image versions to keep when cleanup is enabled</span>
+            </div>
         </div>
     `;
 
@@ -450,6 +458,7 @@ function addNewImage() {
         auto_update: false,
         container_name: '',
         cleanup_old_images: false,
+        keep_versions: 3,
         registry: ''
     };
 
@@ -565,12 +574,14 @@ function collectFormData() {
         const registry = card.querySelector('input[name="registry"]').value.trim();
         const autoUpdate = card.querySelector('input[name="auto_update"]').checked;
         const cleanup = card.querySelector('input[name="cleanup_old_images"]').checked;
+        const keepVersions = parseInt(card.querySelector('input[name="keep_versions"]').value, 10) || 3;
 
         if (baseTag) config.base_tag = baseTag;
         if (containerName) config.container_name = containerName;
         if (registry) config.registry = registry;
         if (autoUpdate) config.auto_update = true;
         if (cleanup) config.cleanup_old_images = true;
+        if (keepVersions !== 3) config.keep_versions = keepVersions;
 
         configs.push(config);
     });

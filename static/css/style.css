@@ -623,6 +623,28 @@ h1 {
     justify-content: flex-end;
 }
 
+/* Keep Versions Field */
+.keep-versions-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.keep-versions-group label {
+    margin-bottom: 0;
+    min-width: auto;
+}
+
+.form-input-small {
+    width: 80px;
+}
+
+.field-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
 /* Responsive - Config Cards */
 @media (max-width: 768px) {
     .config-toolbar {
