@@ -607,7 +607,7 @@ class DockerImageUpdater:
         # Environment variables
         for env_var in config.get('Env', []):
             # Skip Docker-injected variables
-            if not any(env_var.startswith(prefix) for prefix in ['PATH=', 'HOSTNAME=']):
+            if not any(env_var.startswith(prefix) for prefix in ('PATH=', 'HOSTNAME=')):
                 cmd.extend(['-e', env_var])
                 
         # Port mappings
