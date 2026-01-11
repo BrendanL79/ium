@@ -7,6 +7,7 @@ import json
 import os
 import threading
 import time
+import traceback
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -47,7 +48,9 @@ def load_history():
     try:
         if HISTORY_FILE.exists():
             with open(HISTORY_FILE, 'r') as f:
-                update_history = json.load(f)
+                loaded = json.load(f)
+                # Ensure we have a list, not None or other type
+                update_history = loaded if isinstance(loaded, list) else []
                 logger.info(f"Loaded {len(update_history)} history entries from {HISTORY_FILE}")
     except (json.JSONDecodeError, IOError) as e:
         logger.warning(f"Could not load history file: {e}")
@@ -124,8 +127,9 @@ def run_check():
                 'timestamp': last_check_time.isoformat()
             }, namespace='/')
     except Exception as e:
-        logger.error(f"Check failed: {e}")
-        socketio.emit('check_error', {'error': str(e)}, namespace='/')
+        tb = traceback.format_exc()
+        logger.error(f"Check failed: {e}\n{tb}")
+        socketio.emit('check_error', {'error': str(e), 'traceback': tb}, namespace='/')
     finally:
         is_checking = False
         socketio.emit('status_update', {'checking': False}, namespace='/')
