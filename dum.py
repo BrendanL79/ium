@@ -13,6 +13,7 @@ import sys
 import time
 import logging
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any, Union
 from pathlib import Path
@@ -336,17 +337,18 @@ class DockerImageUpdater:
             # Handle manifest lists for multi-arch support
             if 'manifest.list' in content_type or 'image.index' in content_type:
                 manifest_list = response.json()
-                
+                manifests = manifest_list.get('manifests') or []
+
                 # If platform specified, find matching manifest
                 if platform:
-                    for manifest in manifest_list.get('manifests', []):
+                    for manifest in manifests:
                         if manifest.get('platform', {}).get('os') + '/' + \
                            manifest.get('platform', {}).get('architecture') == platform:
                             return manifest.get('digest')
-                            
+
                 # Return first manifest if no platform specified
-                if manifest_list.get('manifests'):
-                    return manifest_list['manifests'][0].get('digest')
+                if manifests:
+                    return manifests[0].get('digest')
                     
             # Single manifest
             return response.headers.get('Docker-Content-Digest')
@@ -354,7 +356,42 @@ class DockerImageUpdater:
         except requests.RequestException as e:
             self.logger.error(f"Error getting manifest for {namespace}/{repo}:{tag}: {e}")
             return None
-            
+
+    def _get_manifest_digest_head(self, registry: str, namespace: str, repo: str,
+                                   tag: str, token: Optional[str]) -> Optional[str]:
+        """
+        Get manifest digest using HEAD request (faster, no body transfer).
+
+        Returns the Docker-Content-Digest header which is the digest of the
+        manifest list for multi-arch images, or the manifest itself for single-arch.
+        This is more correct for comparison than parsing manifest list JSON.
+
+        Args:
+            registry: Registry hostname
+            namespace: Image namespace
+            repo: Repository name
+            tag: Tag name
+            token: Authentication token
+
+        Returns:
+            Manifest digest or None
+        """
+        manifest_url = f"https://{registry}/v2/{namespace}/{repo}/manifests/{tag}"
+
+        headers = {
+            'Accept': MANIFEST_ACCEPT_HEADER
+        }
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+
+        try:
+            response = requests.head(manifest_url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            return response.headers.get('Docker-Content-Digest')
+        except requests.RequestException as e:
+            self.logger.debug(f"Error getting manifest digest for {namespace}/{repo}:{tag}: {e}")
+            return None
+
     def _get_all_tags(self, registry: str, namespace: str, repo: str, token: Optional[str]) -> List[str]:
         """
         Get all available tags for an image.
@@ -377,7 +414,7 @@ class DockerImageUpdater:
         try:
             response = requests.get(tags_url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            return response.json().get('tags', [])
+            return response.json().get('tags') or []
         except requests.RequestException as e:
             self.logger.error(f"Error getting tags for {namespace}/{repo}: {e}")
             return []
@@ -386,13 +423,16 @@ class DockerImageUpdater:
                          registry_override: Optional[str] = None) -> Optional[Tuple[str, str]]:
         """
         Find a tag matching the regex pattern that has the same digest as the base tag.
-        
+
+        Uses HEAD requests for faster digest fetching and parallel requests
+        for checking multiple tags concurrently.
+
         Args:
             image: Image name
             base_tag: Base tag to track (e.g., 'latest', 'stable', '14')
             regex_pattern: Regex pattern to match tags
             registry_override: Override registry from config
-            
+
         Returns:
             Tuple of (matching_tag, digest) or None
         """
@@ -400,38 +440,59 @@ class DockerImageUpdater:
         registry, namespace, repo = self._parse_image_reference(image)
         if registry_override:
             registry = registry_override
-            
+
         # Get authentication token
         token = self._get_docker_token(registry, namespace, repo)
-        
-        # Get digest for base tag
-        base_digest = self._get_manifest_digest(registry, namespace, repo, base_tag, token)
+
+        # Get digest for base tag using HEAD request
+        base_digest = self._get_manifest_digest_head(registry, namespace, repo, base_tag, token)
         if not base_digest:
             self.logger.error(f"Could not get digest for {image}:{base_tag}")
             return None
-            
+
         # Get all available tags
         all_tags = self._get_all_tags(registry, namespace, repo, token)
         if not all_tags:
             self.logger.error(f"Could not get tags for {image}")
             return None
-            
+
         # Get cached compiled pattern
         pattern = self.compiled_patterns.get(regex_pattern)
         if not pattern:
             self.logger.error(f"Pattern not found in cache: '{regex_pattern}'")
             return None
-            
+
         # Find tags matching the pattern
         matching_tags = [tag for tag in all_tags if pattern.match(tag)]
         self.logger.debug(f"Found {len(matching_tags)} tags matching pattern")
-        
-        # Find which matching tag has the same digest as base tag
-        for tag in matching_tags:
-            tag_digest = self._get_manifest_digest(registry, namespace, repo, tag, token)
-            if tag_digest == base_digest:
-                return (tag, base_digest)
-                
+
+        if not matching_tags:
+            self.logger.warning(f"No tags matching pattern '{regex_pattern}'")
+            return None
+
+        # Sort tags in reverse order - newest versions typically come last alphabetically
+        # For semver-like tags (v1.2.3), reverse sort puts newest first
+        matching_tags.sort(reverse=True)
+
+        # Fetch digests in parallel using HEAD requests
+        def fetch_digest(tag: str) -> Tuple[str, Optional[str]]:
+            digest = self._get_manifest_digest_head(registry, namespace, repo, tag, token)
+            return (tag, digest)
+
+        # Use ThreadPoolExecutor for parallel fetching (limit concurrency to be nice to registries)
+        max_workers = min(10, len(matching_tags))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(fetch_digest, tag): tag for tag in matching_tags}
+
+            for future in as_completed(futures):
+                tag, digest = future.result()
+                if digest == base_digest:
+                    # Found a match - cancel remaining futures and return
+                    for f in futures:
+                        f.cancel()
+                    self.logger.debug(f"Found matching tag {tag} with digest {digest[:16]}...")
+                    return (tag, base_digest)
+
         self.logger.warning(f"No tag matching pattern '{regex_pattern}' found with same digest as {base_tag}")
         return None
         
@@ -621,13 +682,13 @@ class DockerImageUpdater:
             cmd.extend(['--workdir', config['WorkingDir']])
             
         # Environment variables
-        for env_var in config.get('Env', []):
+        for env_var in config.get('Env') or []:
             # Skip Docker-injected variables
             if not any(env_var.startswith(prefix) for prefix in ('PATH=', 'HOSTNAME=')):
                 cmd.extend(['-e', env_var])
                 
         # Port mappings
-        for container_port, bindings in host_config.get('PortBindings', {}).items():
+        for container_port, bindings in (host_config.get('PortBindings') or {}).items():
             if bindings:
                 for binding in bindings:
                     host_ip = binding.get('HostIp', '')
@@ -638,7 +699,7 @@ class DockerImageUpdater:
                         cmd.extend(['-p', f"{host_port}:{container_port}"])
                         
         # Volume mappings
-        for mount in container_info.get('Mounts', []):
+        for mount in container_info.get('Mounts') or []:
             if mount['Type'] == 'bind':
                 source = mount['Source']
             elif mount['Type'] == 'volume':
@@ -656,7 +717,7 @@ class DockerImageUpdater:
             cmd.extend(['--network', host_config['NetworkMode']])
             
         # Additional networks
-        for network in container_info.get('NetworkSettings', {}).get('Networks', {}).keys():
+        for network in ((container_info.get('NetworkSettings') or {}).get('Networks') or {}).keys():
             if network != host_config.get('NetworkMode'):
                 cmd.extend(['--network', network])
                 
@@ -665,13 +726,13 @@ class DockerImageUpdater:
             cmd.append('--privileged')
             
         # Capabilities
-        for cap in host_config.get('CapAdd', []):
+        for cap in host_config.get('CapAdd') or []:
             cmd.extend(['--cap-add', cap])
-        for cap in host_config.get('CapDrop', []):
+        for cap in host_config.get('CapDrop') or []:
             cmd.extend(['--cap-drop', cap])
-            
+
         # Devices
-        for device in host_config.get('Devices', []):
+        for device in host_config.get('Devices') or []:
             device_str = device['PathOnHost']
             if device.get('PathInContainer'):
                 device_str += f":{device['PathInContainer']}"
@@ -690,13 +751,13 @@ class DockerImageUpdater:
             cmd.extend(['--cpu-quota', str(host_config['CpuQuota'])])
             
         # Labels
-        for key, value in config.get('Labels', {}).items():
+        for key, value in (config.get('Labels') or {}).items():
             # Skip Docker-injected labels
             if not key.startswith('com.docker.'):
                 cmd.extend(['--label', f"{key}={value}"])
-                
+
         # Security options
-        for opt in host_config.get('SecurityOpt', []):
+        for opt in host_config.get('SecurityOpt') or []:
             cmd.extend(['--security-opt', opt])
             
         # Runtime
@@ -708,7 +769,7 @@ class DockerImageUpdater:
         
         # Command and args
         if config.get('Cmd'):
-            cmd.extend(config['Cmd'])
+            cmd.extend(config['Cmd'] or [])
             
         return cmd
         
@@ -820,7 +881,8 @@ class DockerImageUpdater:
                             'base_tag': base_tag,
                             'old_tag': old_tag,
                             'new_tag': matching_tag,
-                            'digest': digest
+                            'digest': digest,
+                            'auto_update': auto_update
                         })
 
                         if auto_update:

@@ -7,6 +7,7 @@ import json
 import os
 import threading
 import time
+import traceback
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -32,9 +33,39 @@ is_checking = False
 daemon_running = False
 daemon_interval = 3600
 
+# History file path (in config directory for persistence)
+HISTORY_FILE = Path(os.environ.get('CONFIG_FILE', '/config/config.json')).parent / 'history.json'
+MAX_HISTORY_ENTRIES = 500  # Limit history size
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def load_history():
+    """Load update history from file."""
+    global update_history
+    try:
+        if HISTORY_FILE.exists():
+            with open(HISTORY_FILE, 'r') as f:
+                loaded = json.load(f)
+                # Ensure we have a list, not None or other type
+                update_history = loaded if isinstance(loaded, list) else []
+                logger.info(f"Loaded {len(update_history)} history entries from {HISTORY_FILE}")
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"Could not load history file: {e}")
+        update_history = []
+
+
+def save_history():
+    """Save update history to file."""
+    try:
+        # Trim to max entries before saving
+        trimmed = update_history[-MAX_HISTORY_ENTRIES:]
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(trimmed, f, indent=2)
+    except IOError as e:
+        logger.error(f"Could not save history file: {e}")
 
 
 def load_updater():
@@ -66,19 +97,19 @@ def require_updater(f):
 def run_check():
     """Run a single check cycle."""
     global is_checking, last_check_time, last_updates
-    
+
     if is_checking:
         return
-        
+
     is_checking = True
-    socketio.emit('status_update', {'checking': True})
-    
+    socketio.emit('status_update', {'checking': True}, namespace='/')
+
     try:
         if updater:
             updates = updater.check_and_update()
             last_updates = updates
             last_check_time = datetime.now()
-            
+
             # Add to history
             if updates:
                 for update in updates:
@@ -87,16 +118,21 @@ def run_check():
                         'image': update['image'],
                         'old_tag': update['old_tag'],
                         'new_tag': update['new_tag'],
-                        'applied': not updater.dry_run
+                        'applied': not updater.dry_run and update.get('auto_update', False)
                     })
-                    
+                save_history()  # Persist to disk
+
             socketio.emit('check_complete', {
                 'updates': updates,
                 'timestamp': last_check_time.isoformat()
-            })
+            }, namespace='/')
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"Check failed: {e}\n{tb}")
+        socketio.emit('check_error', {'error': str(e), 'traceback': tb}, namespace='/')
     finally:
         is_checking = False
-        socketio.emit('status_update', {'checking': False})
+        socketio.emit('status_update', {'checking': False}, namespace='/')
 
 
 def daemon_worker():
@@ -277,8 +313,9 @@ def handle_connect():
     })
 
 
-# Load updater on startup (runs when gunicorn imports this module)
+# Load updater and history on startup (runs when gunicorn imports this module)
 load_updater()
+load_history()
 
 if __name__ == '__main__':
     # For local development only
