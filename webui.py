@@ -32,9 +32,37 @@ is_checking = False
 daemon_running = False
 daemon_interval = 3600
 
+# History file path (in config directory for persistence)
+HISTORY_FILE = Path(os.environ.get('CONFIG_FILE', '/config/config.json')).parent / 'history.json'
+MAX_HISTORY_ENTRIES = 500  # Limit history size
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def load_history():
+    """Load update history from file."""
+    global update_history
+    try:
+        if HISTORY_FILE.exists():
+            with open(HISTORY_FILE, 'r') as f:
+                update_history = json.load(f)
+                logger.info(f"Loaded {len(update_history)} history entries from {HISTORY_FILE}")
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"Could not load history file: {e}")
+        update_history = []
+
+
+def save_history():
+    """Save update history to file."""
+    try:
+        # Trim to max entries before saving
+        trimmed = update_history[-MAX_HISTORY_ENTRIES:]
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(trimmed, f, indent=2)
+    except IOError as e:
+        logger.error(f"Could not save history file: {e}")
 
 
 def load_updater():
@@ -89,6 +117,7 @@ def run_check():
                         'new_tag': update['new_tag'],
                         'applied': not updater.dry_run
                     })
+                save_history()  # Persist to disk
                     
             socketio.emit('check_complete', {
                 'updates': updates,
@@ -277,8 +306,9 @@ def handle_connect():
     })
 
 
-# Load updater on startup (runs when gunicorn imports this module)
+# Load updater and history on startup (runs when gunicorn imports this module)
 load_updater()
+load_history()
 
 if __name__ == '__main__':
     # For local development only
