@@ -396,8 +396,8 @@ function updateRegexTest(card) {
     const testInput = card.querySelector('.regex-test-input');
     const hintDiv = card.querySelector('.regex-test-hint');
 
-    // Reset to default hint if no test input
-    if (!testInput.value) {
+    // Reset to default hint if no test input or no regex pattern
+    if (!testInput.value || !regexInput.value) {
         hintDiv.className = 'regex-test-hint';
         hintDiv.textContent = 'Enter a tag to test if it matches the regex pattern';
         return;
