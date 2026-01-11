@@ -1,6 +1,5 @@
 // Global state
 let socket;
-let status = {};
 let isDaemonRunning = false;
 
 // Initialize Socket.IO connection
