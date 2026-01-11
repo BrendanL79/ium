@@ -8,6 +8,7 @@ import os
 import threading
 import time
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from flask import Flask, render_template, jsonify, request, Response
@@ -49,6 +50,16 @@ def load_updater():
     except Exception as e:
         logger.error(f"Failed to load updater: {e}")
         return False
+
+
+def require_updater(f):
+    """Decorator to check if updater is loaded before executing route."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not updater:
+            return jsonify({'error': 'Updater not loaded'}), 503
+        return f(*args, **kwargs)
+    return decorated
 
 
 def run_check():
@@ -122,20 +133,16 @@ def api_status():
 
 
 @app.route('/api/config')
+@require_updater
 def api_config():
     """Get current configuration."""
-    if not updater:
-        return jsonify({'error': 'Updater not loaded'}), 503
-        
     return jsonify(updater.config)
 
 
 @app.route('/api/config', methods=['POST'])
+@require_updater
 def api_update_config():
     """Update configuration."""
-    if not updater:
-        return jsonify({'error': 'Updater not loaded'}), 503
-        
     try:
         new_config = request.json
         # Validate and save new config
@@ -152,11 +159,9 @@ def api_update_config():
 
 
 @app.route('/api/state')
+@require_updater
 def api_state():
     """Get current state."""
-    if not updater:
-        return jsonify({'error': 'Updater not loaded'}), 503
-        
     state_dict = {
         image: {
             'base_tag': state.base_tag,
