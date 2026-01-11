@@ -21,12 +21,12 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - **Current version detection**: Inspects running containers to show current vs available versions
 
 ## Key Files
-- `dum.py`: Main updater logic with DockerImageUpdater class (~850 lines)
-- `webui.py`: Flask-SocketIO web interface with gunicorn production server (~400 lines)
+- `dum.py`: Main updater logic with DockerImageUpdater class (~880 lines)
+- `webui.py`: Flask-SocketIO web interface with gunicorn production server (~280 lines)
 - `docker-compose.yml`: Five deployment modes (dry-run, prod, webui, webui+dry-run, webui+prod)
 - `config/config.json`: Image definitions with regex patterns (runtime, gitignored)
 - `state/docker_update_state.json`: Tracks current versions/digests (runtime, gitignored)
-- `static/js/app.js`: WebUI frontend logic with Socket.IO real-time updates
+- `static/js/app.js`: WebUI frontend logic with Socket.IO real-time updates (~370 lines)
 - `templates/index.html`: WebUI dashboard structure
 - `static/css/style.css`: WebUI styling
 - `README.md`: Comprehensive user documentation
@@ -51,18 +51,16 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - **Security fixes (bb79953)**: Fixed command injection, JSON schema validation, file locking, request timeouts
 - **Exception handling**: Replaced bare `except:` with specific exception types (OSError, IOError, etc.)
 - **Production hardening**: Cross-platform support (Unix fcntl, Windows msvcrt), proper subprocess usage
-- **Code simplification (simplify1 branch)**:
-  - Regex pattern caching eliminates redundant compilation
-  - Reduced container inspection from 3+ subprocess calls to 1
-  - Simplified image reference parsing (eliminated redundant string operations)
-  - Removed unnecessary validation indirection layers
+- **Code simplification (simplify1 branch)** - Two analysis passes:
+  - **Pass 1**: Regex pattern caching, consolidated container inspection, simplified parsing, removed validation indirection
+  - **Pass 2**: Removed dead code (unused imports, variables, unreachable checks), added `require_updater` decorator, consolidated mount string construction, `threading.Event` for efficient daemon sleep, DOM element caching in JS, optional chaining
 
 ## Deployment Modes (5 Options)
 1. **CLI Dry-run (default)**: `docker-compose up -d` - Safe monitoring only
 2. **CLI Production**: `docker-compose --profile prod up -d` - Auto-updates enabled
-3. **Web UI Only**: `docker-compose --profile webui up -d` - Browser monitoring (port 5050)
-4. **Web UI + Dry-run**: Both services together for monitoring with browser interface
-5. **Web UI + Production**: `docker-compose --profile webui --profile prod up -d` - Full stack with auto-updates
+3. **Web UI Only**: `docker-compose --profile webui up -d` - Browser interface (port 5050), dry-run mode
+4. **Web UI + CLI Dry-run**: `docker-compose --profile webui up -d dum dum-webui` - Both services, monitoring only
+5. **Web UI + CLI Production**: `docker-compose --profile webui --profile prod up -d` - Full stack with auto-updates
 
 ## Web UI Features (Merged to Main)
 - **Production-ready**: Gunicorn with eventlet workers, not Flask dev server
@@ -90,21 +88,26 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
   - Minimal string operations in image reference parsing
 
 ## Common Patterns
-- LinuxServer.io: `^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+-ls[0-9]+$`
-- Semantic: `^v?[0-9]+\.[0-9]+\.[0-9]+$`
-- PostgreSQL: `^[0-9]+\.[0-9]+$`
+- LinuxServer.io (3-part): `^[0-9]+\.[0-9]+\.[0-9]+-ls[0-9]+$` (e.g., sabnzbd)
+- LinuxServer.io (with v): `^v[0-9]+\.[0-9]+\.[0-9]+-ls[0-9]+$` (e.g., calibre)
+- Semantic versioning: `^v?[0-9]+\.[0-9]+\.[0-9]+$` (e.g., portainer)
+- PostgreSQL major.minor: `^[0-9]+\.[0-9]+$`
 
-## Environment Variables
-**CLI (dum.py):**
+## Environment Variables & CLI Args
+**CLI (dum.py)** - Uses command-line arguments:
+- `--dry-run` - Safe mode, log operations without executing (default in docker-compose)
+- `--daemon` - Run continuously instead of single check
+- `--interval SECONDS` - Check interval for daemon mode (default: 3600)
+- `--state PATH` - State file path (default: docker_update_state.json)
+- `--log-level LEVEL` - DEBUG, INFO, WARNING, ERROR
+- Positional: config file path
+
+**Web UI (webui.py)** - Uses environment variables:
 - `CONFIG_FILE=/config/config.json` - Path to image configuration
 - `STATE_FILE=/state/docker_update_state.json` - Path to persistent state
-- `DRY_RUN=true` - Safety default, set to false for auto-updates
+- `DRY_RUN=true` - Safety default, set to "false" for auto-updates
 - `LOG_LEVEL=INFO` - DEBUG, INFO, WARNING, ERROR
-- `CHECK_INTERVAL=3600` - Seconds between daemon checks (CLI mode)
-
-**Web UI (webui.py):**
-- Same as above, plus:
-- `SECRET_KEY=dev-secret-key-change-in-production` - Flask session security
+- `SECRET_KEY=change-me` - Flask session security (change in production)
 
 ## Docker Socket Permissions
 - **Dry-run mode**: `:ro` (read-only) - Can inspect but not modify
@@ -160,7 +163,7 @@ See `nas-setup.md` for Synology/QNAP setup. Standard mounts:
 - eafaebb: Add current version detection from running containers (main)
 - 9df7d1f: Complete rewrite of README.md with current features
 
-**Code Simplification (simplify1 branch):**
+**Code Simplification (simplify1 branch) - Pass 1:**
 - 5fb75a7: Fix: Move platform detection to module level
 - 2a447c4: Fix: Replace bare exception handlers with specific exceptions
 - 9219b42: Fix: Make Docker socket permissions explicit in production
@@ -168,14 +171,29 @@ See `nas-setup.md` for Synology/QNAP setup. Standard mounts:
 - f0075cb: Fix: Consolidate container inspection calls
 - 637e491: Fix: Simplify image reference parsing logic
 - 9b2cf46: Fix: Simplify redundant state validation
+- c717745: Update CLAUDE.md with comprehensive project context
+
+**Code Simplification (simplify1 branch) - Pass 2:**
+- b3d650b: Fix: Remove unused shlex import
+- 8dc78c7: Fix: Remove dead code duplicate dry_run check
+- 7073161: Fix: Replace unused updater_thread with daemon_thread declaration
+- d92e4a2: Fix: Remove unused status variable from app.js
+- c418f54: Fix: Consolidate duplicated mount string construction
+- f8b02f5: Fix: Add require_updater decorator to reduce code duplication
+- 9f8c428: Fix: Remove unnecessary else block returning None
+- 8f82371: Fix: Use tuple instead of list for prefix iteration
+- 5ee80bf: Fix: Use threading.Event for efficient daemon sleep
+- d6f3bab: Fix: Cache DOM element references for better performance
+- 5d5f422: Fix: Use optional chaining for cleaner null checks
+- c59b134: Fix: Remove unused container_id variable
 
 ## Current Branch Status
 - **main**: Production-ready with Web UI merged, comprehensive README
 - **webui**: Merged into main (PR #1), can be deleted
-- **simplify1**: Code quality improvements, ready for review/merge
-  - 7 commits total (3 critical + 4 high-priority fixes)
-  - Performance optimizations (regex caching, reduced subprocess calls)
-  - Code clarity improvements (simplified parsing, removed indirection)
+- **simplify1**: Code quality improvements across two analysis passes
+  - 20 commits total (8 from pass 1 + 12 from pass 2)
+  - Pass 1: Performance optimizations (regex caching, reduced subprocess calls), code clarity
+  - Pass 2: Dead code removal, reduced duplication (decorators, consolidated logic), modern JS patterns
   - Ready to merge after review
 
 ## Known Patterns & Anti-Patterns
@@ -190,6 +208,10 @@ See `nas-setup.md` for Synology/QNAP setup. Standard mounts:
 - ✅ Solution: Compile once at config load, cache in dictionary
 - ❌ Anti-pattern: Multiple `docker inspect` calls for same container
 - ✅ Solution: Single inspection, extract all needed data at once
+- ❌ Anti-pattern: Repeated `getElementById` calls for same elements
+- ✅ Solution: Cache DOM references at initialization in `dom` object
+- ❌ Anti-pattern: Busy-wait loop with 1-second sleeps for daemon interval
+- ✅ Solution: Use `threading.Event.wait(timeout=interval)` for efficient blocking
 
 **Git Workflow:**
 - Systematic fixes: One commit per fix for clear history
