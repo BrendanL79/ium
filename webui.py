@@ -24,6 +24,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # Global variables
 updater: Optional[DockerImageUpdater] = None
 daemon_thread: Optional[threading.Thread] = None
+daemon_stop_event = threading.Event()
 last_check_time: Optional[datetime] = None
 last_updates: List[Dict[str, Any]] = []
 update_history: List[Dict[str, Any]] = []
@@ -101,14 +102,12 @@ def run_check():
 def daemon_worker():
     """Background worker for daemon mode."""
     global daemon_running
-    
+
     while daemon_running:
         run_check()
-        # Sleep with interruption support
-        for _ in range(daemon_interval):
-            if not daemon_running:
-                break
-            time.sleep(1)
+        # Wait with efficient interruption support
+        if daemon_stop_event.wait(timeout=daemon_interval):
+            break
 
 
 @app.route('/')
@@ -211,34 +210,36 @@ def api_history():
 def api_daemon():
     """Start/stop daemon mode."""
     global daemon_running, daemon_thread, daemon_interval
-    
+
     action = request.json.get('action')
-    
+
     if action == 'start':
         if daemon_running:
             return jsonify({'error': 'Daemon already running'}), 409
-            
+
         if not updater:
             if not load_updater():
                 return jsonify({'error': 'Failed to load updater'}), 503
-                
+
         # Get interval from request or use default
         daemon_interval = request.json.get('interval', 3600)
-        
+
         daemon_running = True
+        daemon_stop_event.clear()
         daemon_thread = threading.Thread(target=daemon_worker)
         daemon_thread.start()
-        
+
         return jsonify({'status': 'started', 'interval': daemon_interval})
-        
+
     elif action == 'stop':
         if not daemon_running:
             return jsonify({'error': 'Daemon not running'}), 409
-            
+
         daemon_running = False
+        daemon_stop_event.set()
         if daemon_thread:
             daemon_thread.join(timeout=5)
-            
+
         return jsonify({'status': 'stopped'})
         
     else:
