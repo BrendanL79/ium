@@ -61,7 +61,8 @@ CONFIG_SCHEMA = {
                     "auto_update": {"type": "boolean"},
                     "container_name": {"type": "string"},
                     "registry": {"type": "string"},
-                    "cleanup_old_images": {"type": "boolean"}
+                    "cleanup_old_images": {"type": "boolean"},
+                    "keep_versions": {"type": "integer", "minimum": 1}
                 },
                 "required": ["image", "regex"]
             }
@@ -711,35 +712,64 @@ class DockerImageUpdater:
             
         return cmd
         
-    def _cleanup_old_images(self, image: str) -> None:
-        """Remove unused images."""
-        if self.dry_run:
-            self.logger.info(f"[DRY RUN] Would cleanup old images for {image}")
-            return
-            
+    def _cleanup_old_images(self, image: str, keep_versions: int = 3) -> None:
+        """Remove old images, keeping the specified number of most recent versions."""
         try:
-            # Get all image IDs for this repository
+            # Get all images for this repository with ID, tag, and creation time
             result = subprocess.run(
-                ['docker', 'images', '-q', image],
+                ['docker', 'images', '--format', '{{.ID}}\t{{.Tag}}\t{{.CreatedAt}}', image],
                 capture_output=True,
                 text=True,
                 check=True
             )
-            
-            image_ids = result.stdout.strip().split('\n')
-            image_ids = [img_id for img_id in image_ids if img_id]
-            
-            # Try to remove each image (will fail if in use)
-            for img_id in image_ids:
+
+            lines = result.stdout.strip().split('\n')
+            lines = [line for line in lines if line]
+
+            if not lines:
+                return
+
+            # Parse and sort by creation time (newest first)
+            images = []
+            for line in lines:
+                parts = line.split('\t')
+                if len(parts) >= 3:
+                    img_id, tag, created = parts[0], parts[1], parts[2]
+                    # Skip <none> tags
+                    if tag != '<none>':
+                        images.append({'id': img_id, 'tag': tag, 'created': created})
+
+            # Sort by creation date descending (newest first)
+            images.sort(key=lambda x: x['created'], reverse=True)
+
+            # Keep the first N versions, mark the rest for removal
+            images_to_remove = images[keep_versions:]
+
+            if not images_to_remove:
+                self.logger.debug(f"No old images to clean up for {image} (keeping {keep_versions})")
+                return
+
+            if self.dry_run:
+                for img in images_to_remove:
+                    self.logger.info(f"[DRY RUN] Would remove old image {image}:{img['tag']} ({img['id'][:12]})")
+                return
+
+            # Remove old images
+            for img in images_to_remove:
                 try:
-                    subprocess.run(
-                        ['docker', 'rmi', img_id],
+                    result = subprocess.run(
+                        ['docker', 'rmi', f"{image}:{img['tag']}"],
                         capture_output=True,
+                        text=True,
                         check=False  # Don't fail if image is in use
                     )
+                    if result.returncode == 0:
+                        self.logger.info(f"Removed old image {image}:{img['tag']}")
+                    else:
+                        self.logger.debug(f"Could not remove {image}:{img['tag']} (may be in use)")
                 except (subprocess.SubprocessError, OSError):
                     pass
-                    
+
         except subprocess.CalledProcessError as e:
             self.logger.warning(f"Error during image cleanup: {e}")
             
@@ -758,6 +788,7 @@ class DockerImageUpdater:
             container_name = image_config.get('container_name')
             registry = image_config.get('registry')
             cleanup = image_config.get('cleanup_old_images', False)
+            keep_versions = image_config.get('keep_versions', 3)
             
             self.logger.info(f"Checking {image}:{base_tag}...")
             
@@ -803,7 +834,7 @@ class DockerImageUpdater:
 
                                 # Cleanup old images if requested
                                 if cleanup:
-                                    self._cleanup_old_images(image)
+                                    self._cleanup_old_images(image, keep_versions)
 
                                 # Update state
                                 self.state[image] = ImageState(

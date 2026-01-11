@@ -42,10 +42,12 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
     "auto_update": false,
     "container_name": "calibre",
     "cleanup_old_images": true,
+    "keep_versions": 3,
     "registry": "optional-custom-registry"
   }]
 }
 ```
+- `keep_versions`: Number of image versions to retain when cleanup is enabled (default: 3)
 
 ## Security & Code Quality Improvements
 - **Security fixes**: Fixed command injection, JSON schema validation, file locking, request timeouts
