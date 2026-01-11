@@ -128,7 +128,7 @@ function handleCheckComplete(data) {
     addLog('Check complete', 'info');
     updateLastCheck(data.timestamp);
     
-    if (data.updates && data.updates.length > 0) {
+    if (data.updates?.length > 0) {
         displayUpdates(data.updates);
         addLog(`Found ${data.updates.length} updates`, 'warning');
     } else {
@@ -244,7 +244,7 @@ async function loadUpdates() {
         const response = await fetch('/api/updates');
         const data = await response.json();
 
-        if (data.updates && data.updates.length > 0) {
+        if (data.updates?.length > 0) {
             displayUpdates(data.updates);
         } else if (data.last_check) {
             // Check was performed but no updates found
