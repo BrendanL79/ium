@@ -50,7 +50,7 @@ services:
     profiles:
       - prod
 
-  # Web UI service
+  # Web UI service (dry-run mode)
   dum-webui:
     build:
       context: .
@@ -78,6 +78,34 @@ services:
     profiles:
       - webui
 
+  # Web UI service (production mode - auto-updates enabled)
+  dum-webui-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile.webui
+    image: dum-webui:latest
+    container_name: dum-webui
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - ./config:/config
+      - ./state:/state
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CONFIG_FILE=/config/config.json
+      - STATE_FILE=/state/docker_update_state.json
+      - DRY_RUN=false
+      - LOG_LEVEL=INFO
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+    networks:
+      - dum-net
+    labels:
+      - "com.docker.updater.description=Web UI for Docker image updater (production)"
+    profiles:
+      - webui-prod
+
 networks:
   dum-net:
     driver: bridge
@@ -85,7 +113,8 @@ networks:
 # Usage:
 # 1. CLI dry-run daemon only: docker-compose up -d
 # 2. CLI production daemon only: docker-compose --profile prod up -d
-# 3. Web UI only: docker-compose --profile webui up -d
-# 4. Web UI + CLI dry-run daemon: docker-compose --profile webui up -d dum dum-webui
-# 5. Web UI + CLI production daemon: docker-compose --profile webui --profile prod up -d
+# 3. Web UI only (dry-run): docker-compose --profile webui up -d
+# 4. Web UI only (production): docker-compose --profile webui-prod up -d
+# 5. Web UI + CLI dry-run daemon: docker-compose --profile webui up -d dum dum-webui
+# 6. Web UI + CLI production daemon: docker-compose --profile webui-prod --profile prod up -d
 
