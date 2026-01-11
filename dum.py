@@ -625,15 +625,16 @@ class DockerImageUpdater:
         # Volume mappings
         for mount in container_info.get('Mounts', []):
             if mount['Type'] == 'bind':
-                mount_str = f"{mount['Source']}:{mount['Destination']}"
-                if mount.get('Mode'):
-                    mount_str += f":{mount['Mode']}"
-                cmd.extend(['-v', mount_str])
+                source = mount['Source']
             elif mount['Type'] == 'volume':
-                mount_str = f"{mount['Name']}:{mount['Destination']}"
-                if mount.get('Mode'):
-                    mount_str += f":{mount['Mode']}"
-                cmd.extend(['-v', mount_str])
+                source = mount['Name']
+            else:
+                continue
+
+            mount_str = f"{source}:{mount['Destination']}"
+            if mount.get('Mode'):
+                mount_str += f":{mount['Mode']}"
+            cmd.extend(['-v', mount_str])
                 
         # Network mode
         if host_config.get('NetworkMode') and host_config['NetworkMode'] != 'default':
