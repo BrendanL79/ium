@@ -682,13 +682,13 @@ class DockerImageUpdater:
             cmd.extend(['--workdir', config['WorkingDir']])
             
         # Environment variables
-        for env_var in config.get('Env', []):
+        for env_var in config.get('Env') or []:
             # Skip Docker-injected variables
             if not any(env_var.startswith(prefix) for prefix in ('PATH=', 'HOSTNAME=')):
                 cmd.extend(['-e', env_var])
                 
         # Port mappings
-        for container_port, bindings in host_config.get('PortBindings', {}).items():
+        for container_port, bindings in (host_config.get('PortBindings') or {}).items():
             if bindings:
                 for binding in bindings:
                     host_ip = binding.get('HostIp', '')
@@ -699,7 +699,7 @@ class DockerImageUpdater:
                         cmd.extend(['-p', f"{host_port}:{container_port}"])
                         
         # Volume mappings
-        for mount in container_info.get('Mounts', []):
+        for mount in container_info.get('Mounts') or []:
             if mount['Type'] == 'bind':
                 source = mount['Source']
             elif mount['Type'] == 'volume':
@@ -717,7 +717,7 @@ class DockerImageUpdater:
             cmd.extend(['--network', host_config['NetworkMode']])
             
         # Additional networks
-        for network in container_info.get('NetworkSettings', {}).get('Networks', {}).keys():
+        for network in ((container_info.get('NetworkSettings') or {}).get('Networks') or {}).keys():
             if network != host_config.get('NetworkMode'):
                 cmd.extend(['--network', network])
                 
@@ -726,13 +726,13 @@ class DockerImageUpdater:
             cmd.append('--privileged')
             
         # Capabilities
-        for cap in host_config.get('CapAdd', []):
+        for cap in host_config.get('CapAdd') or []:
             cmd.extend(['--cap-add', cap])
-        for cap in host_config.get('CapDrop', []):
+        for cap in host_config.get('CapDrop') or []:
             cmd.extend(['--cap-drop', cap])
-            
+
         # Devices
-        for device in host_config.get('Devices', []):
+        for device in host_config.get('Devices') or []:
             device_str = device['PathOnHost']
             if device.get('PathInContainer'):
                 device_str += f":{device['PathInContainer']}"
@@ -751,13 +751,13 @@ class DockerImageUpdater:
             cmd.extend(['--cpu-quota', str(host_config['CpuQuota'])])
             
         # Labels
-        for key, value in config.get('Labels', {}).items():
+        for key, value in (config.get('Labels') or {}).items():
             # Skip Docker-injected labels
             if not key.startswith('com.docker.'):
                 cmd.extend(['--label', f"{key}={value}"])
-                
+
         # Security options
-        for opt in host_config.get('SecurityOpt', []):
+        for opt in host_config.get('SecurityOpt') or []:
             cmd.extend(['--security-opt', opt])
             
         # Runtime
@@ -769,7 +769,7 @@ class DockerImageUpdater:
         
         # Command and args
         if config.get('Cmd'):
-            cmd.extend(config['Cmd'])
+            cmd.extend(config['Cmd'] or [])
             
         return cmd
         
