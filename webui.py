@@ -22,7 +22,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Global variables
 updater: Optional[DockerImageUpdater] = None
-updater_thread: Optional[threading.Thread] = None
+daemon_thread: Optional[threading.Thread] = None
 last_check_time: Optional[datetime] = None
 last_updates: List[Dict[str, Any]] = []
 update_history: List[Dict[str, Any]] = []
