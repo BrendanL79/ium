@@ -337,17 +337,18 @@ class DockerImageUpdater:
             # Handle manifest lists for multi-arch support
             if 'manifest.list' in content_type or 'image.index' in content_type:
                 manifest_list = response.json()
-                
+                manifests = manifest_list.get('manifests') or []
+
                 # If platform specified, find matching manifest
                 if platform:
-                    for manifest in manifest_list.get('manifests', []):
+                    for manifest in manifests:
                         if manifest.get('platform', {}).get('os') + '/' + \
                            manifest.get('platform', {}).get('architecture') == platform:
                             return manifest.get('digest')
-                            
+
                 # Return first manifest if no platform specified
-                if manifest_list.get('manifests'):
-                    return manifest_list['manifests'][0].get('digest')
+                if manifests:
+                    return manifests[0].get('digest')
                     
             # Single manifest
             return response.headers.get('Docker-Content-Digest')
@@ -413,7 +414,7 @@ class DockerImageUpdater:
         try:
             response = requests.get(tags_url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            return response.json().get('tags', [])
+            return response.json().get('tags') or []
         except requests.RequestException as e:
             self.logger.error(f"Error getting tags for {namespace}/{repo}: {e}")
             return []
