@@ -41,11 +41,6 @@ docker-compose --profile webui up -d
 - Add new images to monitor
 - Modify regex patterns for version matching
 
-### State Tab
-- View current tracked versions
-- See last update timestamps
-- Monitor digest changes
-
 ### History Tab
 - Track all previous updates
 - See what was changed and when

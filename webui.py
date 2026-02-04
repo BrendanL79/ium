@@ -4,19 +4,21 @@ Web UI for Docker Image Auto-Updater
 """
 
 import json
+import logging
 import os
 import threading
-import time
 import traceback
+from dataclasses import asdict
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from flask import Flask, render_template, jsonify, request, Response
-from flask_socketio import SocketIO, emit
-import logging
 
-from dum import DockerImageUpdater, ImageState, DEFAULT_BASE_TAG
+import jsonschema
+from flask import Flask, render_template, jsonify, request
+from flask_socketio import SocketIO, emit
+
+from dum import DockerImageUpdater, CONFIG_SCHEMA
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
@@ -135,14 +137,14 @@ def run_check():
         socketio.emit('status_update', {'checking': False}, namespace='/')
 
 
-def daemon_worker():
+def daemon_worker(interval):
     """Background worker for daemon mode."""
     global daemon_running
 
     while daemon_running:
         run_check()
         # Wait with efficient interruption support
-        if daemon_stop_event.wait(timeout=daemon_interval):
+        if daemon_stop_event.wait(timeout=interval):
             break
 
 
@@ -180,15 +182,22 @@ def api_update_config():
     """Update configuration."""
     try:
         new_config = request.json
-        # Validate and save new config
+        if not new_config:
+            return jsonify({'error': 'No configuration provided'}), 400
+
+        # Validate against schema before saving
+        jsonschema.validate(new_config, CONFIG_SCHEMA)
+
         with open(updater.config_file, 'w') as f:
             json.dump(new_config, f, indent=2)
-        
+
         # Reload updater
         if load_updater():
             return jsonify({'status': 'success'})
         else:
             return jsonify({'error': 'Failed to reload updater'}), 500
+    except jsonschema.ValidationError as e:
+        return jsonify({'error': f'Invalid configuration: {e.message}'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
@@ -197,16 +206,7 @@ def api_update_config():
 @require_updater
 def api_state():
     """Get current state."""
-    state_dict = {
-        image: {
-            'base_tag': state.base_tag,
-            'tag': state.tag,
-            'digest': state.digest,
-            'last_updated': state.last_updated
-        }
-        for image, state in updater.state.items()
-    }
-    
+    state_dict = {image: asdict(state) for image, state in updater.state.items()}
     return jsonify(state_dict)
 
 
@@ -247,7 +247,8 @@ def api_daemon():
     """Start/stop daemon mode."""
     global daemon_running, daemon_thread, daemon_interval
 
-    action = request.json.get('action')
+    data = request.json or {}
+    action = data.get('action')
 
     if action == 'start':
         if daemon_running:
@@ -258,11 +259,11 @@ def api_daemon():
                 return jsonify({'error': 'Failed to load updater'}), 503
 
         # Get interval from request or use default
-        daemon_interval = request.json.get('interval', 3600)
+        daemon_interval = data.get('interval', 3600)
 
         daemon_running = True
         daemon_stop_event.clear()
-        daemon_thread = threading.Thread(target=daemon_worker)
+        daemon_thread = threading.Thread(target=daemon_worker, args=(daemon_interval,))
         daemon_thread.start()
 
         return jsonify({'status': 'started', 'interval': daemon_interval})
@@ -280,24 +281,6 @@ def api_daemon():
         
     else:
         return jsonify({'error': 'Invalid action'}), 400
-
-
-@app.route('/api/logs')
-def api_logs():
-    """Stream logs."""
-    def generate():
-        # Simple log streaming - in production you'd tail actual log files
-        log_file = Path('/var/log/docker-updater.log')
-        if log_file.exists():
-            with open(log_file, 'r') as f:
-                while True:
-                    line = f.readline()
-                    if line:
-                        yield f"data: {json.dumps({'log': line.strip()})}\n\n"
-                    else:
-                        time.sleep(0.5)
-                        
-    return Response(generate(), mimetype='text/event-stream')
 
 
 @socketio.on('connect')

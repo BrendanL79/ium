@@ -20,13 +20,8 @@ function initSocket() {
         updateConnectionStatus(false);
     });
     
-    socket.on('status_update', (data) => {
-        updateStatus(data);
-    });
-    
-    socket.on('check_complete', (data) => {
-        handleCheckComplete(data);
-    });
+    socket.on('status_update', updateStatus);
+    socket.on('check_complete', handleCheckComplete);
 
     socket.on('check_error', (data) => {
         addLog('Check failed: ' + data.error, 'error');
@@ -40,6 +35,7 @@ function initSocket() {
 // Update connection status indicator
 function updateConnectionStatus(connected) {
     if (connected) {
+        dom.statusIndicator.classList.remove('checking');
         dom.statusIndicator.classList.add('connected');
         dom.statusText.textContent = 'Connected';
         loadStatus();
@@ -195,13 +191,7 @@ function createImageCard(config, index, isNew = false) {
     card.dataset.index = index;
 
     // Build badges HTML
-    let badges = '';
-    if (config.auto_update) {
-        badges += '<span class="badge badge-auto-update">Auto-update</span>';
-    }
-    if (config.base_tag && config.base_tag !== 'latest') {
-        badges += `<span class="badge badge-base-tag">${escapeHtml(config.base_tag)}</span>`;
-    }
+    const badges = buildBadgeHtml(config.auto_update, config.base_tag);
 
     card.innerHTML = `
         <div class="card-header">
@@ -360,17 +350,8 @@ function attachCardEventListeners(card, index) {
 
 // Toggle card expand/collapse state
 function toggleCardExpand(card) {
-    const header = card.querySelector('.card-header');
-    const body = card.querySelector('.card-body');
-    const isExpanded = header.classList.contains('expanded');
-
-    if (isExpanded) {
-        header.classList.remove('expanded');
-        body.classList.remove('expanded');
-    } else {
-        header.classList.add('expanded');
-        body.classList.add('expanded');
-    }
+    card.querySelector('.card-header').classList.toggle('expanded');
+    card.querySelector('.card-body').classList.toggle('expanded');
 }
 
 // Validate regex pattern
@@ -437,12 +418,8 @@ function updateRegexTest(card) {
     }
 }
 
-// Update card badges based on current values
-function updateCardBadges(card) {
-    const badgesSpan = card.querySelector('.card-status-badges');
-    const autoUpdate = card.querySelector('input[name="auto_update"]').checked;
-    const baseTag = card.querySelector('input[name="base_tag"]').value;
-
+// Build badge HTML for auto-update and base tag indicators
+function buildBadgeHtml(autoUpdate, baseTag) {
     let badges = '';
     if (autoUpdate) {
         badges += '<span class="badge badge-auto-update">Auto-update</span>';
@@ -450,7 +427,15 @@ function updateCardBadges(card) {
     if (baseTag && baseTag !== 'latest') {
         badges += `<span class="badge badge-base-tag">${escapeHtml(baseTag)}</span>`;
     }
-    badgesSpan.innerHTML = badges;
+    return badges;
+}
+
+// Update card badges based on current values
+function updateCardBadges(card) {
+    const badgesSpan = card.querySelector('.card-status-badges');
+    const autoUpdate = card.querySelector('input[name="auto_update"]').checked;
+    const baseTag = card.querySelector('input[name="base_tag"]').value;
+    badgesSpan.innerHTML = buildBadgeHtml(autoUpdate, baseTag);
 }
 
 // Add new image
@@ -583,8 +568,8 @@ function collectFormData() {
         if (baseTag) config.base_tag = baseTag;
         if (containerName) config.container_name = containerName;
         if (registry) config.registry = registry;
-        if (autoUpdate) config.auto_update = true;
-        if (cleanup) config.cleanup_old_images = true;
+        config.auto_update = autoUpdate;
+        config.cleanup_old_images = cleanup;
         if (keepVersions !== 3) config.keep_versions = keepVersions;
 
         configs.push(config);

@@ -237,17 +237,6 @@ h1 {
     padding: 40px;
 }
 
-.json-editor {
-    width: 100%;
-    min-height: 400px;
-    padding: 10px;
-    font-family: monospace;
-    font-size: 14px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    resize: vertical;
-}
-
 .history-list {
     display: grid;
     gap: 8px;
@@ -320,6 +309,15 @@ h1 {
 
     .tab-button {
         flex: 1 1 45%;
+    }
+
+    .config-toolbar {
+        flex-direction: column;
+    }
+
+    .form-row {
+        flex-direction: column;
+        gap: 12px;
     }
 }
 
@@ -645,14 +643,3 @@ h1 {
     color: var(--text-secondary);
 }
 
-/* Responsive - Config Cards */
-@media (max-width: 768px) {
-    .config-toolbar {
-        flex-direction: column;
-    }
-
-    .form-row {
-        flex-direction: column;
-        gap: 12px;
-    }
-}

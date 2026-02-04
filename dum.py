@@ -2,8 +2,9 @@
 """
 Docker Image Auto-Update with Specific Tag Tracking
 
-This script monitors Docker images for updates by comparing the 'latest' tag
-with version-specific tags that match user-defined regex patterns.
+This script monitors Docker images for updates by comparing a base tag
+(e.g., 'latest', 'stable', or a version like '14') with version-specific
+tags that match user-defined regex patterns.
 """
 
 import json
@@ -15,7 +16,7 @@ import logging
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from contextlib import contextmanager
@@ -23,7 +24,6 @@ import argparse
 import os
 import platform
 import requests
-from urllib.parse import urlparse
 import jsonschema
 
 # Platform-specific imports and constant
@@ -342,8 +342,9 @@ class DockerImageUpdater:
                 # If platform specified, find matching manifest
                 if platform:
                     for manifest in manifests:
-                        if manifest.get('platform', {}).get('os') + '/' + \
-                           manifest.get('platform', {}).get('architecture') == platform:
+                        plat = manifest.get('platform', {})
+                        plat_str = f"{plat.get('os', '')}/{plat.get('architecture', '')}"
+                        if plat_str == platform:
                             return manifest.get('digest')
 
                 # Return first manifest if no platform specified
@@ -517,7 +518,7 @@ class DockerImageUpdater:
         
         try:
             # Use subprocess with proper argument handling
-            result = subprocess.run(
+            subprocess.run(
                 ['docker', 'pull', full_image],
                 capture_output=True,
                 text=True,
@@ -769,7 +770,7 @@ class DockerImageUpdater:
         
         # Command and args
         if config.get('Cmd'):
-            cmd.extend(config['Cmd'] or [])
+            cmd.extend(config['Cmd'])
             
         return cmd
         
@@ -898,13 +899,13 @@ class DockerImageUpdater:
                                 if cleanup:
                                     self._cleanup_old_images(image, keep_versions)
 
-                                # Update state
-                                self.state[image] = ImageState(
-                                    base_tag=base_tag,
-                                    tag=matching_tag,
-                                    digest=digest,
-                                    last_updated=datetime.now().isoformat()
-                                )
+                        # Update state to prevent re-reporting
+                        self.state[image] = ImageState(
+                            base_tag=base_tag,
+                            tag=matching_tag,
+                            digest=digest,
+                            last_updated=datetime.now().isoformat()
+                        )
                     else:
                         self.logger.info(f"Already up to date: {matching_tag}")
                 else:
