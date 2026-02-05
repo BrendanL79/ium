@@ -16,7 +16,7 @@ A Docker image auto-updater that tracks version-specific tags matching regex pat
 - **Container Management**: Preserves all container settings during updates with automatic rollback on failure
 - **State Persistence**: Tracks current versions/digests with atomic file writes and cross-platform file locking
 - **Current Version Detection**: Cross-references container image IDs with local image inventory
-- **Production Ready**: Gunicorn with eventlet for WebSocket support
+- **Production Ready**: Gunicorn with gevent for WebSocket support
 
 ## Quick Start
 

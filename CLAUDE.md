@@ -4,7 +4,7 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 
 ## Key Files
 - `dum.py`: Core updater — `DockerImageUpdater` class, registry API, container management
-- `webui.py`: Flask-SocketIO web interface with gunicorn/eventlet production server
+- `webui.py`: Flask-SocketIO web interface with gunicorn/gevent production server
 - `static/js/app.js`: Frontend — Socket.IO, card-based config editor, live regex validation
 - `static/css/style.css`: Web UI styling
 - `templates/index.html`: Dashboard structure
@@ -42,7 +42,7 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - **Manifest comparison**: HEAD requests for digest comparison, parallel tag fetching via ThreadPoolExecutor
 - **Current version detection**: Cross-references container image ID with local image inventory
 - **Config validation**: JSON schema (`CONFIG_SCHEMA`) validated on load and on web UI save
-- **Web UI**: Vanilla JS + Socket.IO CDN, no build process; gunicorn with eventlet for WebSocket
+- **Web UI**: Vanilla JS + Socket.IO CDN, no build process; gunicorn with gevent for WebSocket
 
 ## Deployment
 | Profile | Socket | Mode | Command |
@@ -72,7 +72,7 @@ Combine profiles for both CLI + Web UI. Never mount socket `:rw` unless auto-upd
 
 ## Dependencies
 - **Core**: `requests`, `jsonschema`
-- **Web UI**: `flask`, `flask-socketio`, `gunicorn`, `eventlet`, `jsonschema`
+- **Web UI**: `flask`, `flask-socketio`, `gunicorn`, `gevent`, `gevent-websocket`, `jsonschema`
 - Python 3.8+, tested on 3.11+
 
 ## NAS Deployment
