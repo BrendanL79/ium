@@ -289,8 +289,8 @@ class DockerImageUpdater:
         # Different auth endpoints for different registries
         if registry == DEFAULT_REGISTRY:
             auth_url = f"{DEFAULT_AUTH_URL}?service=registry.docker.io&scope=repository:{namespace}/{repo}:pull"
-        elif registry == "ghcr.io":
-            # GitHub Container Registry uses /token endpoint
+        elif registry in ("ghcr.io", "lscr.io"):
+            # GitHub Container Registry (and lscr.io which delegates auth to ghcr.io)
             auth_url = f"https://ghcr.io/token?service=ghcr.io&scope=repository:{namespace}/{repo}:pull"
         else:
             # Generic registry auth (may need customization)
