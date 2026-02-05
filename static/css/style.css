@@ -643,3 +643,74 @@ h1 {
     color: var(--text-secondary);
 }
 
+/* Pattern Detection */
+.pattern-detect-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.btn-sm {
+    padding: 5px 12px;
+    font-size: 12px;
+}
+
+.detect-status {
+    font-size: 12px;
+}
+
+.detect-status.loading {
+    color: var(--primary-color);
+}
+
+.detect-status.loading::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--primary-color);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: detect-spin 0.6s linear infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+@keyframes detect-spin {
+    to { transform: rotate(360deg); }
+}
+
+.detect-status.success {
+    color: var(--success-color);
+}
+
+.detect-status.error {
+    color: var(--danger-color);
+}
+
+.detect-status.warning {
+    color: var(--warning-color);
+}
+
+.pattern-dropdown-container {
+    margin-top: 6px;
+}
+
+.pattern-select {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--surface);
+    cursor: pointer;
+}
+
+.pattern-select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.15);
+}
+

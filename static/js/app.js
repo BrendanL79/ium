@@ -230,6 +230,18 @@ function createImageCard(config, index, isNew = false) {
                 <div class="regex-validation">
                     <span class="regex-status"></span>
                 </div>
+                <div class="pattern-detect-row">
+                    <button type="button" class="btn btn-secondary btn-sm btn-detect-patterns"
+                            title="Fetch tags from registry and suggest regex patterns">
+                        Detect Patterns
+                    </button>
+                    <span class="detect-status"></span>
+                </div>
+                <div class="pattern-dropdown-container" style="display: none;">
+                    <select class="form-input pattern-select">
+                        <option value="">-- Select a detected pattern --</option>
+                    </select>
+                </div>
                 <div class="field-error"></div>
             </div>
 
@@ -339,6 +351,20 @@ function attachCardEventListeners(card, index) {
         updateRegexTest(card);
     });
 
+    // Detect patterns button
+    card.querySelector('.btn-detect-patterns').addEventListener('click', () => {
+        detectPatterns(card);
+    });
+
+    // Pattern select dropdown
+    card.querySelector('.pattern-select').addEventListener('change', (e) => {
+        if (e.target.value) {
+            regexInput.value = e.target.value;
+            validateRegex(regexInput);
+            updateRegexTest(card);
+        }
+    });
+
     // Update badges when auto_update or base_tag changes
     autoUpdateCheckbox.addEventListener('change', () => {
         updateCardBadges(card);
@@ -415,6 +441,73 @@ function updateRegexTest(card) {
     } catch (e) {
         hintDiv.className = 'regex-test-hint';
         hintDiv.textContent = 'Enter a tag to test if it matches the regex pattern';
+    }
+}
+
+// Detect tag patterns from registry
+async function detectPatterns(card) {
+    const imageInput = card.querySelector('input[name="image"]');
+    const registryInput = card.querySelector('input[name="registry"]');
+    const btn = card.querySelector('.btn-detect-patterns');
+    const status = card.querySelector('.detect-status');
+    const dropdown = card.querySelector('.pattern-dropdown-container');
+    const select = card.querySelector('.pattern-select');
+
+    const image = imageInput.value.trim();
+    if (!image) {
+        status.className = 'detect-status error';
+        status.textContent = 'Enter an image name first';
+        return;
+    }
+
+    // Show loading state
+    btn.disabled = true;
+    status.className = 'detect-status loading';
+    status.textContent = 'Fetching tags...';
+    dropdown.style.display = 'none';
+
+    try {
+        const response = await fetch('/api/detect-patterns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image: image,
+                registry: registryInput.value.trim()
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            status.className = 'detect-status error';
+            status.textContent = data.error || 'Detection failed';
+            return;
+        }
+
+        if (!data.patterns || data.patterns.length === 0) {
+            status.className = 'detect-status warning';
+            status.textContent = `No patterns detected (${data.total_tags} tags scanned)`;
+            return;
+        }
+
+        // Populate dropdown
+        select.innerHTML = '<option value="">-- Select a detected pattern --</option>';
+        data.patterns.forEach(p => {
+            const option = document.createElement('option');
+            option.value = p.regex;
+            option.textContent = `${p.label} (${p.match_count} tags, e.g. ${p.example_tags.join(', ')})`;
+            select.appendChild(option);
+        });
+
+        dropdown.style.display = 'block';
+        status.className = 'detect-status success';
+        status.textContent = `${data.patterns.length} pattern(s) found from ${data.total_tags} tags`;
+
+    } catch (error) {
+        status.className = 'detect-status error';
+        status.textContent = 'Network error: ' + error.message;
+    } finally {
+        btn.disabled = false;
     }
 }
 

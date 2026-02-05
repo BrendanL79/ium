@@ -18,7 +18,7 @@ import jsonschema
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 
-from dum import DockerImageUpdater, CONFIG_SCHEMA
+from dum import DockerImageUpdater, CONFIG_SCHEMA, detect_tag_patterns
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
@@ -200,6 +200,36 @@ def api_update_config():
         return jsonify({'error': f'Invalid configuration: {e.message}'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/detect-patterns', methods=['POST'])
+@require_updater
+def api_detect_patterns():
+    """Fetch tags from registry and detect regex patterns."""
+    try:
+        data = request.json or {}
+        image = data.get('image', '').strip()
+        if not image:
+            return jsonify({'error': 'Image name is required'}), 400
+
+        registry_override = data.get('registry', '').strip() or None
+
+        registry, namespace, repo = updater._parse_image_reference(image)
+        if registry_override:
+            registry = registry_override
+
+        token = updater._get_docker_token(registry, namespace, repo)
+        tags = updater._get_all_tags(registry, namespace, repo, token)
+
+        if not tags:
+            return jsonify({'error': f'No tags found for {image}. Check the image name and registry.'}), 404
+
+        patterns = detect_tag_patterns(tags)
+        return jsonify({'patterns': patterns, 'total_tags': len(tags)})
+
+    except Exception as e:
+        logger.error(f"Pattern detection failed: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/state')
