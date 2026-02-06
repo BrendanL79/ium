@@ -218,8 +218,7 @@ def api_detect_patterns():
         if registry_override:
             registry = registry_override
 
-        token = updater._get_docker_token(registry, namespace, repo)
-        tags = updater._get_all_tags(registry, namespace, repo, token)
+        tags = updater._get_all_tags_by_date(registry, namespace, repo)
 
         if not tags:
             return jsonify({'error': f'No tags found for {image}. Check the image name and registry.'}), 404
