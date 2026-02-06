@@ -401,10 +401,19 @@ function attachCardEventListeners(card, index) {
         }
     });
 
-    // Auto-detect patterns when image name is entered and regex is empty
+    // Auto-populate container name and detect patterns when image name is entered
     imageInput.addEventListener('blur', () => {
-        if (imageInput.value.trim() && !regexInput.value.trim()) {
-            detectPatterns(card, 3);
+        const imageName = imageInput.value.trim();
+        if (imageName) {
+            // Auto-populate container name if empty
+            const containerInput = card.querySelector('input[name="container_name"]');
+            if (!containerInput.value.trim()) {
+                containerInput.value = imageName.split('/').pop();
+            }
+            // Auto-detect patterns if regex is empty
+            if (!regexInput.value.trim()) {
+                detectPatterns(card, 3);
+            }
         }
     });
 
@@ -697,7 +706,7 @@ function addFromPreset(preset) {
         regex: preset.regex,
         base_tag: '',
         auto_update: false,
-        container_name: '',
+        container_name: preset.image.split('/').pop(),
         cleanup_old_images: false,
         keep_versions: 3,
         registry: preset.registry || ''
