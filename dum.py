@@ -1111,13 +1111,55 @@ class DockerImageUpdater:
                                 last_updated=datetime.now().isoformat()
                             )
                     else:
-                        self.logger.info(f"Already up to date: {matching_tag}")
-                        # Emit progress: already up to date
+                        # Digest changed but tag is the same — image was
+                        # rebuilt under the same tag.  Treat as an update.
+                        self.logger.info(f"IMAGE REBUILT: {matching_tag} (new digest)")
+
+                        update_info = {
+                            'image': image,
+                            'base_tag': base_tag,
+                            'old_tag': matching_tag,
+                            'new_tag': matching_tag,
+                            'digest': digest,
+                            'auto_update': auto_update
+                        }
+                        updates_found.append(update_info)
+
+                        # Emit progress: image rebuilt
                         if progress_callback:
-                            progress_callback('up_to_date', {
+                            progress_callback('image_rebuilt', {
                                 'image': image,
                                 'tag': matching_tag
                             })
+
+                        update_ok = True
+                        if auto_update:
+                            # Pull the fresh image
+                            if self._pull_image(image, base_tag):
+                                self._pull_image(image, matching_tag)
+
+                                if containers:
+                                    container_names = [c['name'] for c in containers]
+                                    self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
+                                    update_results = self._update_containers(container_names, image, matching_tag)
+                                    update_ok = any(update_results.values()) if update_results else True
+                                else:
+                                    self.logger.info(f"No containers found for {image}, image updated only")
+                                    update_ok = True
+
+                                if update_ok and cleanup:
+                                    self._cleanup_old_images(image, keep_versions)
+                            else:
+                                update_ok = False
+
+                        # Update state
+                        if not auto_update or update_ok:
+                            self.state[image] = ImageState(
+                                base_tag=base_tag,
+                                tag=matching_tag,
+                                digest=digest,
+                                last_updated=datetime.now().isoformat()
+                            )
                 else:
                     self.logger.info("No update available")
                     # Emit progress: no update

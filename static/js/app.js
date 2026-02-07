@@ -158,8 +158,8 @@ function handleCheckProgress(data) {
         case 'update_found':
             addLog(`  → Update available: ${eventData.old_tag} → ${eventData.new_tag}`, 'warning');
             break;
-        case 'up_to_date':
-            addLog(`  ✓ Already up to date: ${eventData.tag}`, 'success');
+        case 'image_rebuilt':
+            addLog(`  → Image rebuilt: ${eventData.tag} (new digest)`, 'warning');
             break;
         case 'no_update':
             addLog(`  - No update available`, 'info');
