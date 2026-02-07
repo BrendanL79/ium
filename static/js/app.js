@@ -45,6 +45,7 @@ function initSocket() {
     
     socket.on('status_update', updateStatus);
     socket.on('check_complete', handleCheckComplete);
+    socket.on('check_progress', handleCheckProgress);
 
     socket.on('check_error', (data) => {
         addLog('Check failed: ' + data.error, 'error');
@@ -143,6 +144,26 @@ function updateDaemonButton() {
         dom.toggleDaemon.classList.add('btn-secondary');
         dom.daemonIndicator.classList.remove('connected');
         dom.daemonStatusText.textContent = 'Daemon: Stopped';
+    }
+}
+
+// Handle check progress event
+function handleCheckProgress(data) {
+    const { event, data: eventData } = data;
+
+    switch (event) {
+        case 'checking_image':
+            addLog(`[${eventData.progress}/${eventData.total}] Checking ${eventData.image}:${eventData.base_tag}...`, 'info');
+            break;
+        case 'update_found':
+            addLog(`  → Update available: ${eventData.old_tag} → ${eventData.new_tag}`, 'warning');
+            break;
+        case 'up_to_date':
+            addLog(`  ✓ Already up to date: ${eventData.tag}`, 'success');
+            break;
+        case 'no_update':
+            addLog(`  - No update available`, 'info');
+            break;
     }
 }
 

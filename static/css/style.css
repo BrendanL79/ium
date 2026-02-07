@@ -288,6 +288,10 @@ h1 {
     color: #dcdcaa;
 }
 
+.log-line.success {
+    color: #4ec9b0;
+}
+
 .app-footer {
     text-align: center;
     padding: 15px 0 5px;

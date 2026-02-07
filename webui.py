@@ -139,9 +139,16 @@ def run_check():
     is_checking = True
     socketio.emit('status_update', {'checking': True}, namespace='/')
 
+    def progress_callback(event_type, data):
+        """Emit progress updates to connected clients."""
+        socketio.emit('check_progress', {
+            'event': event_type,
+            'data': data
+        }, namespace='/')
+
     try:
         if updater:
-            updates = updater.check_and_update()
+            updates = updater.check_and_update(progress_callback=progress_callback)
             last_updates = updates
             last_check_time = datetime.now()
 

@@ -1000,14 +1000,19 @@ class DockerImageUpdater:
         except subprocess.CalledProcessError as e:
             self.logger.warning(f"Error during image cleanup: {e}")
             
-    def check_and_update(self) -> List[Dict[str, Any]]:
-        """Check for updates and apply them if configured."""
+    def check_and_update(self, progress_callback=None) -> List[Dict[str, Any]]:
+        """Check for updates and apply them if configured.
+
+        Args:
+            progress_callback: Optional function(event_type, data) called for progress updates
+        """
         if self.dry_run:
             self.logger.info("=== DRY RUN MODE ===")
-            
+
         updates_found = []
-        
-        for image_config in self.config.get('images', []):
+        total_images = len(self.config.get('images', []))
+
+        for idx, image_config in enumerate(self.config.get('images', []), 1):
             image = image_config['image']
             regex = image_config['regex']
             base_tag = image_config.get('base_tag', DEFAULT_BASE_TAG)
@@ -1015,8 +1020,17 @@ class DockerImageUpdater:
             registry = image_config.get('registry')
             cleanup = image_config.get('cleanup_old_images', False)
             keep_versions = image_config.get('keep_versions', 3)
-            
+
             self.logger.info(f"Checking {image}:{base_tag}...")
+
+            # Emit progress: starting check for this image
+            if progress_callback:
+                progress_callback('checking_image', {
+                    'image': image,
+                    'base_tag': base_tag,
+                    'progress': idx,
+                    'total': total_images
+                })
             
             # Find matching tag for current base tag
             result = self.find_matching_tag(image, base_tag, regex, registry)
@@ -1044,14 +1058,19 @@ class DockerImageUpdater:
                     if old_tag != matching_tag:
                         self.logger.info(f"UPDATE AVAILABLE: {old_tag} -> {matching_tag}")
 
-                        updates_found.append({
+                        update_info = {
                             'image': image,
                             'base_tag': base_tag,
                             'old_tag': old_tag,
                             'new_tag': matching_tag,
                             'digest': digest,
                             'auto_update': auto_update
-                        })
+                        }
+                        updates_found.append(update_info)
+
+                        # Emit progress: update found
+                        if progress_callback:
+                            progress_callback('update_found', update_info)
 
                         update_ok = True
                         if auto_update:
@@ -1091,8 +1110,20 @@ class DockerImageUpdater:
                             )
                     else:
                         self.logger.info(f"Already up to date: {matching_tag}")
+                        # Emit progress: already up to date
+                        if progress_callback:
+                            progress_callback('up_to_date', {
+                                'image': image,
+                                'tag': matching_tag
+                            })
                 else:
                     self.logger.info("No update available")
+                    # Emit progress: no update
+                    if progress_callback:
+                        progress_callback('no_update', {
+                            'image': image,
+                            'base_tag': base_tag
+                        })
                     
         # Save state
         self._save_state()
