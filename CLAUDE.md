@@ -8,7 +8,7 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - `static/js/app.js`: Frontend — Socket.IO, card-based config editor, live regex validation
 - `static/css/style.css`: Web UI styling
 - `templates/index.html`: Dashboard structure
-- `docker-compose.yml`: Six deployment profiles (dry-run, prod, webui, webui-prod, combos)
+- `docker-compose.yml`: Two services (dum Web UI default, dum-cli with `cli` profile)
 - `config/config.json`: Image definitions (runtime, gitignored)
 - `config/history.json`: Persistent update history (auto-managed, max 500 entries)
 - `state/docker_update_state.json`: Current versions/digests (runtime, gitignored)
@@ -45,19 +45,17 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - **Web UI**: Vanilla JS + Socket.IO CDN, no build process; gunicorn with gevent for WebSocket
 
 ## Deployment
-| Profile | Socket | Mode | Command |
-|---------|--------|------|---------|
-| (default) | `:ro` | CLI dry-run | `docker-compose up -d` |
-| `prod` | `:rw` | CLI auto-update | `docker-compose --profile prod up -d` |
-| `webui` | `:ro` | Web UI dry-run | `docker-compose --profile webui up -d` |
-| `webui-prod` | `:rw` | Web UI auto-update | `docker-compose --profile webui-prod up -d` |
+| Service | Profile | Command |
+|---------|---------|---------|
+| Web UI (`dum`) | (default) | `docker-compose up -d` |
+| CLI daemon (`dum-cli`) | `cli` | `docker-compose --profile cli up -d dum-cli` |
 
-Combine profiles for both CLI + Web UI. Never mount socket `:rw` unless auto-updates are intentional.
+Both services mount the Docker socket `:rw`. Updates are safe by default — `auto_update` is `false` per image.
 
 ## Environment Variables
-**CLI (`dum.py`)**: `--dry-run`, `--daemon`, `--interval SECONDS`, `--state PATH`, `--log-level LEVEL`, positional config path
+**CLI (`dum.py`)**: `--dry-run`, `--daemon`, `--interval SECONDS`, `--state PATH`, `--log-level LEVEL`, positional config path. All flags have env var equivalents: `DRY_RUN`, `DAEMON`, `CHECK_INTERVAL`, `STATE_FILE`, `LOG_LEVEL`, `CONFIG_FILE`
 
-**Web UI (`webui.py`)**: `CONFIG_FILE`, `STATE_FILE`, `DRY_RUN=true`, `LOG_LEVEL=INFO`, `WEBUI_USER`, `WEBUI_PASSWORD`
+**Web UI (`webui.py`)**: `CONFIG_FILE`, `STATE_FILE`, `DRY_RUN=false`, `LOG_LEVEL=INFO`, `WEBUI_USER`, `WEBUI_PASSWORD`
 
 ## Code Conventions
 - **Type hints** throughout (Tuple, Optional, Dict, etc.)

@@ -1260,35 +1260,42 @@ def main():
     parser = argparse.ArgumentParser(
         description='Docker image auto-updater with tag tracking'
     )
-    parser.add_argument('config', help='Path to configuration JSON file')
     parser.add_argument(
-        '--state', 
-        default='docker_update_state.json',
-        help='Path to state file (default: docker_update_state.json)'
+        'config',
+        nargs='?',
+        default=os.environ.get('CONFIG_FILE', 'config.json'),
+        help='Path to configuration JSON file (env: CONFIG_FILE, default: config.json)'
+    )
+    parser.add_argument(
+        '--state',
+        default=os.environ.get('STATE_FILE', 'docker_update_state.json'),
+        help='Path to state file (env: STATE_FILE, default: docker_update_state.json)'
     )
     parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Show what would be done without making any changes'
+        default=os.environ.get('DRY_RUN', '').lower() == 'true',
+        help='Show what would be done without making any changes (env: DRY_RUN)'
     )
     parser.add_argument(
         '--daemon',
         action='store_true',
-        help='Run continuously, checking at intervals'
+        default=os.environ.get('DAEMON', '').lower() == 'true',
+        help='Run continuously, checking at intervals (env: DAEMON)'
     )
     parser.add_argument(
         '--interval',
         type=int,
-        default=3600,
-        help='Check interval in seconds when running as daemon (default: 3600)'
+        default=int(os.environ.get('CHECK_INTERVAL', '3600')),
+        help='Check interval in seconds when running as daemon (env: CHECK_INTERVAL, default: 3600)'
     )
     parser.add_argument(
         '--log-level',
         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-        default='INFO',
-        help='Logging level (default: INFO)'
+        default=os.environ.get('LOG_LEVEL', 'INFO'),
+        help='Logging level (env: LOG_LEVEL, default: INFO)'
     )
-    
+
     args = parser.parse_args()
     
     try:

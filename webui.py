@@ -108,7 +108,7 @@ def load_updater():
     global updater
     config_file = os.environ.get('CONFIG_FILE', '/config/config.json')
     state_file = os.environ.get('STATE_FILE', '/state/docker_update_state.json')
-    dry_run = os.environ.get('DRY_RUN', 'true').lower() == 'true'
+    dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
     log_level = os.environ.get('LOG_LEVEL', 'INFO')
     
     try:

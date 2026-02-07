@@ -35,13 +35,11 @@ You can create `config/config.json` manually or use the Web UI to configure imag
 2. **Choose your deployment mode:**
 
 ```bash
-# Web UI in dry-run mode (recommended first run)
-docker-compose --profile webui up -d
-
-# CLI dry-run daemon only
+# Web UI (default)
 docker-compose up -d
 
-# Production modes — see Deployment Modes below
+# CLI daemon only
+docker-compose --profile cli up -d dum-cli
 ```
 
 3. **Access Web UI** (if enabled): http://localhost:5050
@@ -52,7 +50,7 @@ If you have no config file yet, start the Web UI and create one from the browser
 
 ```bash
 echo '{"images": []}' > config/config.json
-docker-compose --profile webui up -d --build
+docker-compose up -d --build
 ```
 
 Then open http://localhost:5050, go to the Configuration tab, and use **Add from Preset** to quickly add known images or **+ Add Image** for any image (patterns are auto-detected when you enter the image name).
@@ -148,66 +146,49 @@ These patterns are also available as built-in presets in the Web UI:
 
 ## Deployment Modes
 
-### 1. Web UI with Dry-run (Recommended)
+All modes are safe by default — `auto_update` is `false` per image until you explicitly enable it.
+
+### 1. Web UI (Default)
 ```bash
-docker-compose --profile webui up -d
+docker-compose up -d
 ```
 - Web interface at http://localhost:5050
 - Card-based configuration editor with presets and auto-detect
 - Real-time monitoring, daemon control, and update history
-- Dry-run mode (safe - no actual changes)
 
-### 2. CLI Daemon - Dry-run (Testing)
+### 2. CLI Daemon
 ```bash
-docker-compose up -d
+docker-compose --profile cli up -d dum-cli
 ```
-- Runs in dry-run mode (safe)
-- Logs what would be updated without making changes
-- Hourly checks by default (configurable)
+- Background daemon, hourly checks (configurable via `CHECK_INTERVAL`)
+- Monitor logs: `docker logs -f dum-cli`
 
-### 3. CLI Daemon - Production
+### 3. Web UI + CLI Daemon
 ```bash
-docker-compose --profile prod up -d
+docker-compose --profile cli up -d
 ```
-- Actually performs updates when `auto_update: true`
-- Monitor logs: `docker logs -f dum-prod`
-
-### 4. Web UI - Production
-```bash
-docker-compose --profile webui-prod up -d
-```
-- Web interface with auto-updates enabled
-- Docker socket mounted read-write
-
-### 5. Web UI + CLI Production Daemon
-```bash
-docker-compose --profile webui --profile prod up -d
-```
-- Web interface for monitoring + CLI daemon for updates
 - Both services share config and state
 
-### 6. Standalone CLI
+### 4. Standalone CLI
 ```bash
 python dum.py config/config.json [options]
 ```
 
-**Options:**
-- `--dry-run` - Don't make actual changes (recommended for testing)
-- `--daemon` - Run continuously
-- `--interval SECONDS` - Check interval (default: 3600)
-- `--log-level LEVEL` - DEBUG, INFO, WARNING, ERROR (default: INFO)
-- `--state FILE` - State file path
+**Options (all have env var equivalents):**
+- `--dry-run` - Don't make actual changes (`DRY_RUN`)
+- `--daemon` - Run continuously (`DAEMON`)
+- `--interval SECONDS` - Check interval, default: 3600 (`CHECK_INTERVAL`)
+- `--log-level LEVEL` - DEBUG, INFO, WARNING, ERROR, default: INFO (`LOG_LEVEL`)
+- `--state FILE` - State file path (`STATE_FILE`)
 
 ## Docker Compose Services
 
-| Service | Description | Profile | Socket |
-|---------|-------------|---------|--------|
-| `dum` | CLI daemon, dry-run | (default) | `:ro` |
-| `dum-prod` | CLI daemon, production | `prod` | `:rw` |
-| `dum-webui` | Web UI, dry-run | `webui` | `:ro` |
-| `dum-webui-prod` | Web UI, production | `webui-prod` | `:rw` |
+| Service | Description | Profile |
+|---------|-------------|---------|
+| `dum` | Web UI | (default) |
+| `dum-cli` | CLI daemon | `cli` |
 
-All services share the `dum-net` bridge network.
+Both services share the `dum-net` bridge network.
 
 **Volumes:**
 - `./config:/config` - Configuration and update history
@@ -218,11 +199,12 @@ All services share the `dum-net` bridge network.
 
 | Variable | Description | Default | Used by |
 |----------|-------------|---------|---------|
-| `CONFIG_FILE` | Path to config JSON | `/config/config.json` | Web UI |
-| `STATE_FILE` | Path to state JSON | `/state/docker_update_state.json` | Web UI |
-| `DRY_RUN` | Enable dry-run mode | `true` | Web UI |
-| `LOG_LEVEL` | Logging verbosity | `INFO` | Both |
+| `CONFIG_FILE` | Path to config JSON | `/config/config.json` | Both |
+| `STATE_FILE` | Path to state JSON | `/state/docker_update_state.json` | Both |
+| `DRY_RUN` | Enable dry-run mode | `false` | Both |
+| `DAEMON` | Run continuously | `true` | CLI |
 | `CHECK_INTERVAL` | Seconds between checks | `3600` | CLI |
+| `LOG_LEVEL` | Logging verbosity | `INFO` | Both |
 | `WEBUI_USER` | Basic auth username (optional) | (disabled) | Web UI |
 | `WEBUI_PASSWORD` | Basic auth password (optional) | (disabled) | Web UI |
 
@@ -291,7 +273,7 @@ When `auto_update: true` and an update is detected:
 **"No check performed yet" persists**
 - Click "Check Now" to trigger first check
 - Verify container is running: `docker ps --filter "name=dum"`
-- Check logs: `docker logs dum-webui`
+- Check logs: `docker logs dum`
 
 **"No tag matching pattern found"**
 - Use the Web UI's regex test input to validate your pattern against a known tag
@@ -304,7 +286,7 @@ When `auto_update: true` and an update is detected:
 
 **Web UI shows "Disconnected"**
 - Check container is running and port 5050 is accessible
-- Review logs: `docker logs dum-webui`
+- Review logs: `docker logs dum`
 
 **Updates not applying in production mode**
 - Verify `auto_update: true` in config
@@ -331,7 +313,7 @@ git clone https://github.com/BrendanL79/dum.git
 cd dum
 mkdir -p config state
 echo '{"images": []}' > config/config.json
-docker-compose --profile webui up -d --build
+docker-compose up -d --build
 ```
 
 Access the Web UI at `http://<NAS-IP>:5050` to configure images via presets.

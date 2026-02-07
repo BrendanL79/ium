@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-LABEL org.opencontainers.image.title="dum-webui"
-LABEL org.opencontainers.image.description="Docker Update Manager — Web UI"
+LABEL org.opencontainers.image.title="dum"
+LABEL org.opencontainers.image.description="Docker Update Manager"
 LABEL org.opencontainers.image.source="https://github.com/BrendanL79/dum"
 LABEL org.opencontainers.image.licenses="MIT"
 
@@ -31,7 +31,7 @@ ENV PYTHONUNBUFFERED=1
 ENV FLASK_APP=webui.py
 ENV CONFIG_FILE=/config/config.json
 ENV STATE_FILE=/state/docker_update_state.json
-ENV DRY_RUN=true
+ENV DRY_RUN=false
 
 # Expose web port
 EXPOSE 5050
