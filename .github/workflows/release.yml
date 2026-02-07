@@ -15,7 +15,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-webui.txt
+        run: pip install -r requirements.txt -r requirements-webui.txt pytest
 
       - name: Run tests
         run: pytest tests/ --ignore=tests/test_live.py -v
