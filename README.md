@@ -29,7 +29,7 @@ docker run -d --name ium -p 5050:5050 \
   brendanl79/ium:latest
 ```
 
-Or with docker-compose — save the [docker-compose.yml](docker-compose.yml) from this repo, then:
+Or with docker-compose — save the [docker-compose.yml](https://github.com/BrendanL79/ium/blob/main/docker-compose.yml) from this repo, then:
 
 ```bash
 docker-compose up -d              # Web UI at http://localhost:5050
@@ -118,4 +118,4 @@ pip install -r requirements.txt && pytest tests/
 
 ## NAS Deployment
 
-See [nas-setup.md](nas-setup.md).
+See [nas-setup.md](https://github.com/BrendanL79/ium/blob/main/nas-setup.md).
