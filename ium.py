@@ -795,7 +795,8 @@ class DockerImageUpdater:
             self.logger.debug(f"Could not get current tag for {container_name}: {e}")
             return None
 
-    def _update_container(self, container_name: str, image: str, tag: str) -> bool:
+    def _update_container(self, container_name: str, image: str, tag: str,
+                          registry: Optional[str] = None) -> bool:
         """
         Update a running container with a new image.
 
@@ -803,11 +804,19 @@ class DockerImageUpdater:
             container_name: Name of the container to update
             image: Image name
             tag: Tag to use
+            registry: Optional registry override (e.g. 'ghcr.io')
 
         Returns:
             True if successful, False otherwise
         """
-        full_image = f"{image}:{tag}"
+        # Apply registry prefix the same way _pull_image does, so the image
+        # reference matches what Docker stored when it pulled the image.
+        pull_image = image
+        if registry and registry != DEFAULT_REGISTRY:
+            first = image.split('/')[0]
+            if '.' not in first and first != 'localhost' and ':' not in first:
+                pull_image = f"{registry}/{image}"
+        full_image = f"{pull_image}:{tag}"
 
         if self.dry_run:
             self.logger.info(f"[DRY RUN] Would update container {container_name} with image {full_image}")
@@ -865,13 +874,15 @@ class DockerImageUpdater:
             self.logger.error(f"Error updating container: {e}")
             return False
 
-    def _update_containers(self, container_names: List[str], image: str, tag: str) -> Dict[str, bool]:
+    def _update_containers(self, container_names: List[str], image: str, tag: str,
+                           registry: Optional[str] = None) -> Dict[str, bool]:
         """Update multiple containers to a new image tag.
 
         Args:
             container_names: List of container names to update
             image: Base image name
             tag: Target tag to update to
+            registry: Optional registry override (e.g. 'ghcr.io')
 
         Returns:
             Dict mapping container_name -> success boolean
@@ -879,7 +890,7 @@ class DockerImageUpdater:
         results = {}
         for container_name in container_names:
             self.logger.info(f"Updating container {container_name} to {image}:{tag}")
-            success = self._update_container(container_name, image, tag)
+            success = self._update_container(container_name, image, tag, registry)
             results[container_name] = success
 
         # Log summary
@@ -1172,7 +1183,7 @@ class DockerImageUpdater:
                                 # Update all discovered containers
                                 container_names = [c['name'] for c in containers]
                                 self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
-                                update_results = self._update_containers(container_names, image, matching_tag)
+                                update_results = self._update_containers(container_names, image, matching_tag, registry)
 
                                 # Success if any container updated
                                 update_ok = any(update_results.values()) if update_results else True
@@ -1229,7 +1240,7 @@ class DockerImageUpdater:
                             if containers:
                                 container_names = [c['name'] for c in containers]
                                 self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
-                                update_results = self._update_containers(container_names, image, matching_tag)
+                                update_results = self._update_containers(container_names, image, matching_tag, registry)
                                 update_ok = any(update_results.values()) if update_results else True
                             else:
                                 self.logger.info(f"No containers found for {image}, image updated only")
