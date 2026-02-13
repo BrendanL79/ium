@@ -46,11 +46,12 @@ class TestMultiContainerUpdate:
 
             updates = updater.check_and_update()
 
-            # Verify update was called with both container names
+            # Verify update was called with both container names (registry=None for Docker Hub)
             mock_update.assert_called_once_with(
                 ['sonarr-hd', 'sonarr-4k'],
                 'linuxserver/sonarr',
-                '4.0.16.2944-ls299'
+                '4.0.16.2944-ls299',
+                None
             )
 
             # Verify update was detected
