@@ -70,6 +70,9 @@ def require_auth():
     if not AUTH_ENABLED:
         return None
 
+    if request.path == '/health':
+        return None
+
     auth = request.authorization
     if auth and _check_credentials(auth.username, auth.password):
         return None
@@ -251,6 +254,12 @@ def daemon_worker(interval):
 def index():
     """Main web interface."""
     return render_template('index.html')
+
+
+@app.route('/health')
+def health():
+    """Unauthenticated liveness probe for container health checks."""
+    return '', 200
 
 
 @app.route('/api/status')

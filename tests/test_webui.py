@@ -271,6 +271,14 @@ class TestAuth:
         resp = auth_client.get("/api/status", headers=_auth_header("admin", "wrong"))
         assert resp.status_code == 401
 
+    def test_health_bypass_auth_when_enabled(self, auth_client):
+        resp = auth_client.get("/health")
+        assert resp.status_code == 200
+
+    def test_health_ok_when_auth_disabled(self, app_client):
+        resp = app_client.get("/health")
+        assert resp.status_code == 200
+
 
 # ===========================================================================
 # TestConfigEndpoint
