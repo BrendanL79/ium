@@ -38,6 +38,11 @@ if not IS_WINDOWS:
 else:
     import msvcrt
 
+# Apply TZ from environment (default UTC) before any logging is configured
+os.environ.setdefault('TZ', 'UTC')
+if not IS_WINDOWS:
+    time.tzset()
+
 
 # Constants
 DEFAULT_REGISTRY = "registry-1.docker.io"
@@ -239,7 +244,8 @@ class DockerImageUpdater:
         if not logger.handlers:
             handler = logging.StreamHandler()
             formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S %Z'
             )
             handler.setFormatter(formatter)
             logger.addHandler(handler)

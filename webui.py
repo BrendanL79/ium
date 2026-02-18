@@ -9,6 +9,7 @@ import hmac
 import json
 import logging
 import os
+import time
 import threading
 import traceback
 from dataclasses import asdict
@@ -46,8 +47,17 @@ MAX_HISTORY_ENTRIES = 500  # Limit history size
 # Daemon state file (in state directory for persistence across restarts)
 DAEMON_STATE_FILE = Path(os.environ.get('STATE_FILE', '/state/image_update_state.json')).parent / 'daemon_state.json'
 
+# Apply TZ from environment (default UTC) before any logging is configured
+os.environ.setdefault('TZ', 'UTC')
+if hasattr(time, 'tzset'):
+    time.tzset()
+
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S %Z'
+)
 logger = logging.getLogger(__name__)
 
 # Auth setup: auto-generates secure credentials on first run if env vars are not set
