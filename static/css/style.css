@@ -536,6 +536,7 @@ h1 {
     font-family: inherit;
     transition: border-color 0.2s, box-shadow 0.2s;
     background: var(--surface);
+    color: var(--text-primary);
 }
 
 .form-input:focus {
