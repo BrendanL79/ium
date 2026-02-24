@@ -918,15 +918,17 @@ class DockerImageUpdater:
             return None
 
     def _update_container(self, container_name: str, image: str, tag: str,
-                          registry: Optional[str] = None) -> bool:
+                          registry: Optional[str] = None, start: bool = True) -> bool:
         """
-        Update a running container with a new image.
+        Recreate a container with a new image, preserving its configuration.
 
         Args:
             container_name: Name of the container to update
             image: Image name
             tag: Tag to use
             registry: Optional registry override (e.g. 'ghcr.io')
+            start: If True (default), start the new container after creation.
+                   If False, leave it stopped (for containers that were not running).
 
         Returns:
             True if successful, False otherwise
@@ -941,7 +943,8 @@ class DockerImageUpdater:
         full_image = f"{pull_image}:{tag}"
 
         if self.dry_run:
-            self.logger.info(f"[DRY RUN] Would update container {container_name} with image {full_image}")
+            action = "start" if start else "recreate (stopped)"
+            self.logger.info(f"[DRY RUN] Would {action} container {container_name} with image {full_image}")
             return True
 
         # Get current container configuration
@@ -955,20 +958,22 @@ class DockerImageUpdater:
                 container_name, full_image, container_info
             )
 
-            # Stop the container
-            self.logger.info(f"Stopping container {container_name}...")
-            self.docker.stop_container(container_name)
+            if start:
+                # Stop the running container before replacing it
+                self.logger.info(f"Stopping container {container_name}...")
+                self.docker.stop_container(container_name)
 
             # Rename old container as backup
             backup_name = f"{container_name}_backup_{int(time.time())}"
             self.logger.info(f"Renaming old container to {backup_name}")
             self.docker.rename_container(container_name, backup_name)
 
-            # Create and start new container
+            # Create new container (and start it if it was running)
             self.logger.info(f"Creating new container {container_name}...")
             try:
                 container_id = self.docker.create_container(container_name, create_config)
-                self.docker.start_container(container_id)
+                if start:
+                    self.docker.start_container(container_id)
 
                 # Connect to additional networks
                 for network in extra_networks:
@@ -980,19 +985,23 @@ class DockerImageUpdater:
                 self.logger.info("Rolling back...")
                 try:
                     self.docker.rename_container(backup_name, container_name)
-                    self.docker.start_container(container_name)
+                    if start:
+                        self.docker.start_container(container_name)
                 except DockerAPIError:
                     pass
                 return False
 
-            # Success - remove old container (best-effort; new container is already running)
+            # Success - remove old container (best-effort)
             self.logger.info(f"Removing old container {backup_name}")
             try:
                 self.docker.remove_container(backup_name, force=True, timeout=120)
             except (TimeoutError, OSError, DockerAPIError) as e:
                 self.logger.warning(f"Could not remove backup container {backup_name}: {e} — remove it manually")
 
-            self.logger.info(f"Successfully updated container {container_name}")
+            if start:
+                self.logger.info(f"Successfully updated container {container_name}")
+            else:
+                self.logger.info(f"Successfully recreated container {container_name} with new image (not started)")
             return True
 
         except DockerAPIError as e:
@@ -1000,7 +1009,7 @@ class DockerImageUpdater:
             return False
 
     def _update_containers(self, container_names: List[str], image: str, tag: str,
-                           registry: Optional[str] = None) -> Dict[str, bool]:
+                           registry: Optional[str] = None, start: bool = True) -> Dict[str, bool]:
         """Update multiple containers to a new image tag.
 
         Args:
@@ -1008,6 +1017,7 @@ class DockerImageUpdater:
             image: Base image name
             tag: Target tag to update to
             registry: Optional registry override (e.g. 'ghcr.io')
+            start: Whether to start the containers after recreation (default True)
 
         Returns:
             Dict mapping container_name -> success boolean
@@ -1015,7 +1025,7 @@ class DockerImageUpdater:
         results = {}
         for container_name in container_names:
             self.logger.info(f"Updating container {container_name} to {image}:{tag}")
-            success = self._update_container(container_name, image, tag, registry)
+            success = self._update_container(container_name, image, tag, registry, start=start)
             results[container_name] = success
 
         # Log summary
@@ -1320,12 +1330,16 @@ class DockerImageUpdater:
                                 # Success if any container updated
                                 update_ok = any(update_results.values()) if update_results else True
                             else:
-                                if containers:
-                                    skipped = [c['name'] for c in containers]
-                                    self.logger.info(f"No running containers for {image} — skipping container update ({', '.join(skipped)} not running), image updated only")
-                                else:
+                                if not containers:
                                     self.logger.info(f"No containers found for {image}, image updated only")
                                 update_ok = True
+
+                            # Recreate stopped containers with the new image but leave them stopped
+                            stopped_containers = [c for c in containers if c['state'] != 'running']
+                            if stopped_containers:
+                                stopped_names = [c['name'] for c in stopped_containers]
+                                self.logger.info(f"Recreating {len(stopped_containers)} stopped container(s) with new image (will not be started): {', '.join(stopped_names)}")
+                                self._update_containers(stopped_names, image, matching_tag, registry, start=False)
 
                             # Only cleanup old images after a successful update,
                             # otherwise we may remove tags still in use
@@ -1384,12 +1398,16 @@ class DockerImageUpdater:
                                 update_results = self._update_containers(container_names, image, matching_tag, registry)
                                 update_ok = any(update_results.values()) if update_results else True
                             else:
-                                if containers:
-                                    skipped = [c['name'] for c in containers]
-                                    self.logger.info(f"No running containers for {image} — skipping container update ({', '.join(skipped)} not running), image updated only")
-                                else:
+                                if not containers:
                                     self.logger.info(f"No containers found for {image}, image updated only")
                                 update_ok = True
+
+                            # Recreate stopped containers with the new image but leave them stopped
+                            stopped_containers = [c for c in containers if c['state'] != 'running']
+                            if stopped_containers:
+                                stopped_names = [c['name'] for c in stopped_containers]
+                                self.logger.info(f"Recreating {len(stopped_containers)} stopped container(s) with new image (will not be started): {', '.join(stopped_names)}")
+                                self._update_containers(stopped_names, image, matching_tag, registry, start=False)
 
                             if update_ok and cleanup:
                                 self._cleanup_old_images(image, keep_versions)
