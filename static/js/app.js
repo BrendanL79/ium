@@ -322,7 +322,6 @@ async function applyUpdate(btn) {
             btn.textContent = '\u2713 Applied';
             btn.classList.add('applied');
             item.classList.add('applied');
-            item.style.borderLeftColor = 'var(--success-color)';
             showToast(`${image} updated to ${newTag}`, 'success');
             addLog(`Manually applied: ${image} \u2192 ${newTag}`, 'success');
         } else {
@@ -1270,41 +1269,40 @@ function switchTab(tabName) {
 }
 
 function updateLogBadge() {
-    const badge = document.getElementById('log-badge');
-    if (!badge) return;
+    if (!dom.logBadge) return;
     if (logUnreadCount > 0) {
-        badge.textContent = logUnreadCount > 99 ? '99+' : logUnreadCount;
-        badge.style.display = '';
+        dom.logBadge.textContent = logUnreadCount > 99 ? '99+' : logUnreadCount;
+        dom.logBadge.style.display = '';
     } else {
-        badge.style.display = 'none';
+        dom.logBadge.style.display = 'none';
     }
+}
+
+function setBannerDirty(bannerEl, isDirty) {
+    if (bannerEl) bannerEl.style.display = isDirty ? '' : 'none';
 }
 
 function markConfigDirty() {
     if (configDirty) return;
     configDirty = true;
-    const banner = document.getElementById('unsaved-banner');
-    if (banner) banner.style.display = '';
+    setBannerDirty(dom.unsavedBanner, true);
 }
 
 function markConfigClean() {
     configDirty = false;
-    const banner = document.getElementById('unsaved-banner');
-    if (banner) banner.style.display = 'none';
+    setBannerDirty(dom.unsavedBanner, false);
     markNotifClean();
 }
 
 function markNotifDirty() {
     if (notifDirty) return;
     notifDirty = true;
-    const banner = document.getElementById('unsaved-banner-notifications');
-    if (banner) banner.style.display = '';
+    setBannerDirty(dom.unsavedBannerNotifications, true);
 }
 
 function markNotifClean() {
     notifDirty = false;
-    const banner = document.getElementById('unsaved-banner-notifications');
-    if (banner) banner.style.display = 'none';
+    setBannerDirty(dom.unsavedBannerNotifications, false);
 }
 
 // Initialize everything when DOM is ready
@@ -1329,6 +1327,9 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.historyList = document.getElementById('history-list');
     dom.daemonInterval = document.getElementById('daemon-interval');
     dom.appVersion = document.getElementById('app-version');
+    dom.unsavedBanner = document.getElementById('unsaved-banner');
+    dom.unsavedBannerNotifications = document.getElementById('unsaved-banner-notifications');
+    dom.logBadge = document.getElementById('log-badge');
     document.getElementById('theme-toggle').addEventListener('click', cycleTheme);
     dom.ntfyUrl = document.getElementById('ntfy-url');
     dom.ntfyPriority = document.getElementById('ntfy-priority');

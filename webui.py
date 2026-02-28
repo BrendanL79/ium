@@ -22,7 +22,7 @@ import jsonschema
 from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO, emit
 
-from ium import DockerImageUpdater, CONFIG_SCHEMA, __version__, _validate_regex, AuthManager
+from ium import DockerImageUpdater, CONFIG_SCHEMA, __version__, _validate_regex, AuthManager, ImageState
 from notify import send_ntfy, send_webhook, _build_payload
 from pattern_utils import detect_tag_patterns, detect_base_tags
 
@@ -467,7 +467,8 @@ def api_apply_update():
         # Pull base tag and new tag
         if not updater._pull_image(image, base_tag, registry):
             return jsonify({'error': f'Failed to pull {image}:{base_tag}'}), 500
-        updater._pull_image(image, new_tag, registry)
+        if not updater._pull_image(image, new_tag, registry):
+            return jsonify({'error': f'Failed to pull {image}:{new_tag}'}), 500
 
         # Discover and update containers
         containers = updater._get_containers_for_image(image)
@@ -478,7 +479,6 @@ def api_apply_update():
                 return jsonify({'error': 'All container updates failed'}), 500
 
         # Update state
-        from ium import ImageState
         updater.state[image] = ImageState(
             base_tag=base_tag,
             tag=new_tag,
