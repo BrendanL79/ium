@@ -271,3 +271,82 @@ class TestNetworkModeConstraints:
         config, _ = updater._build_create_config('test', 'image:latest', info)
         assert config.get('Hostname') == 'myapp'
         assert '3000/tcp' in config.get('HostConfig', {}).get('PortBindings', {})
+
+
+class TestHealthcheck:
+    """Health check config must be preserved during container recreation."""
+
+    def test_healthcheck_preserved(self, updater):
+        info = _make_container_info(Config={
+            'Hostname': 'abcdef123456',
+            'User': '', 'WorkingDir': '',
+            'Env': ['PATH=/usr/bin:/bin'],
+            'Cmd': None, 'Labels': {},
+            'Healthcheck': {
+                'Test': ['CMD-SHELL', 'curl -f http://localhost/ || exit 1'],
+                'Interval': 30000000000,
+                'Timeout': 10000000000,
+                'Retries': 3,
+            },
+        })
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        hc = config.get('Healthcheck')
+        assert hc is not None
+        assert hc['Test'] == ['CMD-SHELL', 'curl -f http://localhost/ || exit 1']
+        assert hc['Interval'] == 30000000000
+
+    def test_healthcheck_none_skipped(self, updater):
+        info = _make_container_info(Config={
+            'Hostname': 'abcdef123456',
+            'User': '', 'WorkingDir': '',
+            'Env': ['PATH=/usr/bin:/bin'],
+            'Cmd': None, 'Labels': {},
+            'Healthcheck': {
+                'Test': ['NONE'],
+            },
+        })
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        assert 'Healthcheck' not in config
+
+    def test_no_healthcheck(self, updater):
+        info = _make_container_info()
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        assert 'Healthcheck' not in config
+
+
+class TestLogConfig:
+    """Non-default logging drivers must be preserved during container recreation."""
+
+    def test_non_default_log_config_preserved(self, updater):
+        info = _make_container_info(HostConfig={
+            'RestartPolicy': {'Name': '', 'MaximumRetryCount': 0},
+            'NetworkMode': 'default',
+            'PortBindings': None,
+            'Privileged': False, 'CapAdd': None, 'CapDrop': None,
+            'Devices': None, 'Memory': 0, 'CpuShares': 0,
+            'CpuQuota': 0, 'SecurityOpt': None, 'Runtime': '',
+            'LogConfig': {'Type': 'syslog', 'Config': {'syslog-address': 'udp://1.2.3.4:1111'}},
+        })
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        lc = config.get('HostConfig', {}).get('LogConfig')
+        assert lc is not None
+        assert lc['Type'] == 'syslog'
+        assert lc['Config']['syslog-address'] == 'udp://1.2.3.4:1111'
+
+    def test_default_json_file_log_config_skipped(self, updater):
+        info = _make_container_info(HostConfig={
+            'RestartPolicy': {'Name': '', 'MaximumRetryCount': 0},
+            'NetworkMode': 'default',
+            'PortBindings': None,
+            'Privileged': False, 'CapAdd': None, 'CapDrop': None,
+            'Devices': None, 'Memory': 0, 'CpuShares': 0,
+            'CpuQuota': 0, 'SecurityOpt': None, 'Runtime': '',
+            'LogConfig': {'Type': 'json-file', 'Config': {}},
+        })
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        assert 'LogConfig' not in config.get('HostConfig', {})
+
+    def test_no_log_config(self, updater):
+        info = _make_container_info()
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        assert 'HostConfig' not in config or 'LogConfig' not in config.get('HostConfig', {})
