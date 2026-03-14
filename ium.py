@@ -980,6 +980,12 @@ class DockerImageUpdater:
         if not container_info:
             return False
 
+        # Skip if already running the target image (e.g. retry after partial failure)
+        current_image = container_info.get('Config', {}).get('Image', '')
+        if current_image == full_image:
+            self.logger.info(f"Container {container_name} already running {full_image}, skipping")
+            return True
+
         try:
             # Build container create config preserving all settings
             create_config, extra_networks = self._build_create_config(
@@ -1382,8 +1388,11 @@ class DockerImageUpdater:
                                 self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
                                 update_results = self._update_containers(container_names, image, matching_tag, registry)
 
-                                # Success if any container updated
-                                update_ok = any(update_results.values()) if update_results else True
+                                # Only mark success if ALL containers updated;
+                                # partial failure leaves state unchanged so the
+                                # update is retried next cycle (already-updated
+                                # containers are skipped automatically)
+                                update_ok = all(update_results.values()) if update_results else True
                             else:
                                 # No containers - just image update
                                 self.logger.info(f"No containers found for {image}, image updated only")

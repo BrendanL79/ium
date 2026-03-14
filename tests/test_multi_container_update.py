@@ -59,8 +59,8 @@ class TestMultiContainerUpdate:
             assert updates[0]['old_tag'] == '4.0.0.740-ls290'
             assert updates[0]['new_tag'] == '4.0.16.2944-ls299'
 
-    def test_partial_update_success_updates_state(self, updater):
-        """Test that state is updated if any container succeeds."""
+    def test_partial_update_failure_does_not_update_state(self, updater):
+        """Test that state is NOT updated when some containers fail, so the update is retried."""
         containers = [
             {'name': 'sonarr-hd', 'id': 'abc123', 'state': 'running', 'image_ref': 'linuxserver/sonarr:4.0.0.740'},
             {'name': 'sonarr-4k', 'id': 'def456', 'state': 'running', 'image_ref': 'linuxserver/sonarr:4.0.0.740'},
@@ -74,9 +74,8 @@ class TestMultiContainerUpdate:
 
             updater.check_and_update()
 
-            # State should be updated because at least one container succeeded
-            assert 'linuxserver/sonarr' in updater.state
-            assert updater.state['linuxserver/sonarr'].tag == '4.0.16.2944-ls299'
+            # State should NOT be updated — partial failure triggers retry next cycle
+            assert 'linuxserver/sonarr' not in updater.state
 
     def test_no_containers_image_only_update(self, updater):
         """Test updating image when no containers exist."""
@@ -188,3 +187,51 @@ class TestImageCleanup:
 
             # Should NOT call cleanup after failed update
             mock_cleanup.assert_not_called()
+
+
+class TestSkipAlreadyUpdated:
+    """Containers already running the target image should be skipped on retry."""
+
+    def test_skip_container_already_on_target_image(self, updater):
+        """A container already running the target image is skipped (returns True)."""
+        container_info = {
+            'Config': {'Image': 'linuxserver/sonarr:4.0.16.2944-ls299'},
+        }
+        with patch.object(updater, '_get_container_config', return_value=container_info), \
+             patch.object(updater.docker, 'stop_container') as mock_stop:
+
+            result = updater._update_container('sonarr', 'linuxserver/sonarr', '4.0.16.2944-ls299')
+            assert result is True
+            mock_stop.assert_not_called()
+
+    def test_update_container_with_different_image(self, updater):
+        """A container on a different image proceeds with the update."""
+        container_info = {
+            'Id': 'abc123' * 10,
+            'Config': {
+                'Image': 'linuxserver/sonarr:4.0.0.740-ls290',
+                'Hostname': 'abc123abc1',
+                'User': '', 'WorkingDir': '',
+                'Env': ['PATH=/usr/bin:/bin'],
+                'Cmd': None, 'Labels': {},
+            },
+            'HostConfig': {
+                'RestartPolicy': {'Name': '', 'MaximumRetryCount': 0},
+                'NetworkMode': 'default',
+                'PortBindings': None,
+                'Privileged': False, 'CapAdd': None, 'CapDrop': None,
+                'Devices': None, 'Memory': 0, 'CpuShares': 0,
+                'CpuQuota': 0, 'SecurityOpt': None, 'Runtime': '',
+            },
+            'Mounts': [],
+            'NetworkSettings': {'Networks': {}},
+        }
+        with patch.object(updater, '_get_container_config', return_value=container_info), \
+             patch.object(updater.docker, 'stop_container'), \
+             patch.object(updater.docker, 'rename_container'), \
+             patch.object(updater.docker, 'create_container', return_value='new123'), \
+             patch.object(updater.docker, 'start_container'), \
+             patch.object(updater.docker, 'remove_container'):
+
+            result = updater._update_container('sonarr', 'linuxserver/sonarr', '4.0.16.2944-ls299')
+            assert result is True
