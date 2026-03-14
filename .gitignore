@@ -1,4 +1,7 @@
 __pycache__/
+.pytest_cache/
+.claude/
 claude-session-*.txt
 config/config.json
+config/history.json
 state/
