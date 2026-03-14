@@ -287,6 +287,37 @@ class DockerImageUpdater:
 
         return logger
         
+    def _request_with_retry(self, method: str, url: str, **kwargs) -> requests.Response:
+        """HTTP request with retry on transient failures (connection errors, 5xx)."""
+        max_retries = 3
+        backoff = 2
+        kwargs.setdefault('timeout', REQUEST_TIMEOUT)
+        last_exception: Optional[Exception] = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = requests.request(method, url, **kwargs)
+                if response.status_code >= 500 and attempt < max_retries:
+                    self.logger.warning(
+                        f"Registry returned {response.status_code} for {url}, "
+                        f"retrying in {backoff}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+                return response
+            except requests.ConnectionError as e:
+                last_exception = e
+                if attempt < max_retries:
+                    self.logger.warning(
+                        f"Connection error for {url}: {e}, "
+                        f"retrying in {backoff}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(backoff)
+                    backoff *= 2
+                else:
+                    raise
+        raise last_exception  # unreachable, satisfies type checker
+
     def _load_config(self) -> Dict[str, Any]:
         """Load and validate configuration from JSON file."""
         try:
@@ -460,7 +491,7 @@ class DockerImageUpdater:
             auth_url = f"https://{registry}/v2/auth?service={registry}&scope=repository:{namespace}/{repo}:pull"
             
         try:
-            response = requests.get(auth_url, timeout=REQUEST_TIMEOUT)
+            response = self._request_with_retry('GET', auth_url)
             response.raise_for_status()
             return response.json().get('token')
         except requests.RequestException as e:
@@ -492,7 +523,7 @@ class DockerImageUpdater:
             headers['Authorization'] = f'Bearer {token}'
             
         try:
-            response = requests.get(manifest_url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response = self._request_with_retry('GET', manifest_url, headers=headers)
             response.raise_for_status()
             
             content_type = response.headers.get('Content-Type', '')
@@ -549,7 +580,7 @@ class DockerImageUpdater:
             headers['Authorization'] = f'Bearer {token}'
 
         try:
-            response = requests.head(manifest_url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response = self._request_with_retry('HEAD', manifest_url, headers=headers)
             response.raise_for_status()
             return response.headers.get('Docker-Content-Digest')
         except requests.HTTPError as e:
@@ -582,7 +613,7 @@ class DockerImageUpdater:
             headers['Authorization'] = f'Bearer {token}'
 
         try:
-            response = requests.get(tags_url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response = self._request_with_retry('GET', tags_url, headers=headers)
             response.raise_for_status()
             return response.json().get('tags') or []
         except requests.RequestException as e:
@@ -613,7 +644,7 @@ class DockerImageUpdater:
         max_tags = 500
         while url and len(tag_dates) < max_tags:
             try:
-                response = requests.get(url, timeout=REQUEST_TIMEOUT)
+                response = self._request_with_retry('GET', url)
                 response.raise_for_status()
                 data = response.json()
                 for result in data.get('results') or []:
@@ -949,6 +980,12 @@ class DockerImageUpdater:
         if not container_info:
             return False
 
+        # Skip if already running the target image (e.g. retry after partial failure)
+        current_image = container_info.get('Config', {}).get('Image', '')
+        if current_image == full_image:
+            self.logger.info(f"Container {container_name} already running {full_image}, skipping")
+            return True
+
         try:
             # Build container create config preserving all settings
             create_config, extra_networks = self._build_create_config(
@@ -1101,6 +1138,13 @@ class DockerImageUpdater:
         if not shares_network_namespace and config.get('ExposedPorts'):
             create_config['ExposedPorts'] = config['ExposedPorts']
 
+        # Health check
+        if config.get('Healthcheck'):
+            healthcheck = config['Healthcheck']
+            # Only preserve if it has an actual test command (not NONE)
+            if healthcheck.get('Test') and healthcheck['Test'] != ['NONE']:
+                create_config['Healthcheck'] = healthcheck
+
         # ── HostConfig ────────────────────────────────────────────
         hc: Dict[str, Any] = {}
 
@@ -1166,6 +1210,11 @@ class DockerImageUpdater:
         # Runtime
         if host_config.get('Runtime'):
             hc['Runtime'] = host_config['Runtime']
+
+        # Logging configuration (preserve non-default drivers)
+        log_config = host_config.get('LogConfig', {})
+        if log_config.get('Type') and log_config['Type'] != 'json-file':
+            hc['LogConfig'] = log_config
 
         if hc:
             create_config['HostConfig'] = hc
@@ -1339,8 +1388,11 @@ class DockerImageUpdater:
                                 self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
                                 update_results = self._update_containers(container_names, image, matching_tag, registry)
 
-                                # Success if any container updated
-                                update_ok = any(update_results.values()) if update_results else True
+                                # Only mark success if ALL containers updated;
+                                # partial failure leaves state unchanged so the
+                                # update is retried next cycle (already-updated
+                                # containers are skipped automatically)
+                                update_ok = all(update_results.values()) if update_results else True
                             else:
                                 # No containers - just image update
                                 self.logger.info(f"No containers found for {image}, image updated only")
