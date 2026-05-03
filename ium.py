@@ -7,7 +7,7 @@ This script monitors Docker images for updates by comparing a base tag
 tags that match user-defined regex patterns.
 """
 
-__version__ = "1.2.2"
+__version__ = "1.2.3"
 
 import json
 import re
@@ -1284,33 +1284,36 @@ class DockerImageUpdater:
         return create_config, extra_networks
         
     def _cleanup_old_images(self, image: str, keep_versions: int = 3) -> None:
-        """Remove old images, keeping the specified number of most recent versions."""
+        """Remove old images, keeping the specified number of most recent versions.
+
+        Counts distinct image IDs, not tag rows — so a current image carrying
+        multiple local tags (e.g. :version + :latest after a base_tag pull)
+        consumes only ONE keep slot, not one per tag.
+        """
         try:
             api_images = self.docker.list_images(image)
 
             if not api_images:
                 return
 
-            # Flatten to individual tag entries with creation time
-            images = []
+            # Group tag refs per distinct image ID (skip <none> tags).
+            distinct = []
             for img in api_images:
-                for repo_tag in img.get('RepoTags') or []:
-                    if ':' in repo_tag:
-                        tag = repo_tag.rsplit(':', 1)[1]
-                    else:
-                        tag = repo_tag
-                    if tag != '<none>':
-                        images.append({
-                            'id': img.get('Id', '')[:19],  # sha256: + 12 chars
-                            'tag': tag,
-                            'created': img.get('Created', 0),
-                        })
+                tags = [t for t in (img.get('RepoTags') or [])
+                        if t and not t.endswith(':<none>') and t != '<none>:<none>']
+                if not tags:
+                    continue
+                distinct.append({
+                    'id': img.get('Id', ''),
+                    'tags': tags,
+                    'created': img.get('Created', 0),
+                })
 
-            # Sort by creation time descending (newest first)
-            images.sort(key=lambda x: x['created'], reverse=True)
+            # Sort distinct images by creation time descending (newest first)
+            distinct.sort(key=lambda x: x['created'], reverse=True)
 
-            # Keep the first N versions, mark the rest for removal
-            images_to_remove = images[keep_versions:]
+            # Keep the first N distinct images, mark the rest for removal
+            images_to_remove = distinct[keep_versions:]
 
             if not images_to_remove:
                 self.logger.debug(f"No old images to clean up for {image} (keeping {keep_versions})")
@@ -1318,18 +1321,24 @@ class DockerImageUpdater:
 
             if self.dry_run:
                 for img in images_to_remove:
-                    self.logger.info(f"[DRY RUN] Would remove old image {image}:{img['tag']} ({img['id'][:12]})")
+                    short_id = img['id'][7:19] if img['id'].startswith('sha256:') else img['id'][:12]
+                    self.logger.info(
+                        f"[DRY RUN] Would remove old image {short_id} "
+                        f"(tags: {', '.join(img['tags'])})"
+                    )
                 return
 
-            # Remove old images
+            # Drop every tag of each old image so the image is actually freed,
+            # not just untagged on one ref.
             for img in images_to_remove:
-                try:
-                    if self.docker.remove_image(f"{image}:{img['tag']}"):
-                        self.logger.info(f"Removed old image {image}:{img['tag']}")
-                    else:
-                        self.logger.debug(f"Could not remove {image}:{img['tag']} (may be in use)")
-                except (DockerAPIError, OSError) as e:
-                    self.logger.warning(f"Could not remove {image}:{img['tag']}: {e}")
+                for tag_ref in img['tags']:
+                    try:
+                        if self.docker.remove_image(tag_ref):
+                            self.logger.info(f"Removed old image {tag_ref}")
+                        else:
+                            self.logger.debug(f"Could not remove {tag_ref} (may be in use)")
+                    except (DockerAPIError, OSError) as e:
+                        self.logger.warning(f"Could not remove {tag_ref}: {e}")
 
         except DockerAPIError as e:
             self.logger.warning(f"Error during image cleanup: {e}")
