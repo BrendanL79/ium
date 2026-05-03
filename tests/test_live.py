@@ -57,6 +57,14 @@ class TestTokenAuth:
         assert token is not None
         assert len(token) > 0
 
+    def test_codeberg_token(self, updater):
+        """Codeberg's container registry uses /v2/token (not /v2/auth)
+        with service=container_registry — discovery via WWW-Authenticate
+        is required to reach the right endpoint."""
+        token = updater._get_docker_token("codeberg.org", "forgejo", "forgejo")
+        assert token is not None
+        assert len(token) > 0
+
 
 # ---------------------------------------------------------------------------
 # Tag listing — one representative image per registry

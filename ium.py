@@ -7,7 +7,7 @@ This script monitors Docker images for updates by comparing a base tag
 tags that match user-defined regex patterns.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.2.2"
 
 import json
 import re
@@ -267,6 +267,8 @@ class DockerImageUpdater:
 
         # Load configuration and state
         self.compiled_patterns = {}  # Cache for compiled regex patterns
+        # Per-registry cache of discovered (realm, service) — None means no auth required.
+        self._auth_endpoints: Dict[str, Optional[Tuple[str, str]]] = {}
         self.config = self._load_config()
         self.state = self._load_state()
         
@@ -468,9 +470,53 @@ class DockerImageUpdater:
 
         return registry, namespace, repo
         
+    def _discover_auth_endpoint(self, registry: str, namespace: str, repo: str
+                                ) -> Optional[Tuple[str, str]]:
+        """Probe a registry and return (realm, service) from its WWW-Authenticate.
+
+        Returns None if the registry serves anonymously (200 on probe) or if
+        discovery fails. Result is cached per registry hostname.
+        """
+        if registry in self._auth_endpoints:
+            return self._auth_endpoints[registry]
+
+        probe_url = f"https://{registry}/v2/{namespace}/{repo}/manifests/latest"
+        try:
+            response = self._request_with_retry('HEAD', probe_url)
+        except requests.RequestException as e:
+            self.logger.error(f"Auth discovery failed for {registry}: {e}")
+            return None
+
+        if response.status_code == 200:
+            self._auth_endpoints[registry] = None
+            return None
+
+        if response.status_code != 401:
+            self.logger.error(
+                f"Unexpected status {response.status_code} probing {probe_url}"
+            )
+            return None
+
+        challenge = response.headers.get("WWW-Authenticate", "")
+        realm_match = re.search(r'realm="([^"]+)"', challenge)
+        service_match = re.search(r'service="([^"]+)"', challenge)
+        if not realm_match:
+            self.logger.error(
+                f"Registry {registry} returned 401 without a Bearer realm"
+            )
+            return None
+
+        endpoint = (realm_match.group(1),
+                    service_match.group(1) if service_match else "")
+        self._auth_endpoints[registry] = endpoint
+        return endpoint
+
     def _get_docker_token(self, registry: str, namespace: str, repo: str) -> Optional[str]:
         """
-        Get authentication token for Docker registry.
+        Get authentication token for a Docker Registry v2 endpoint.
+
+        Discovers the auth endpoint via the WWW-Authenticate challenge
+        rather than hardcoding per-host URLs.
 
         Args:
             registry: Registry hostname
@@ -480,16 +526,15 @@ class DockerImageUpdater:
         Returns:
             Authentication token or None
         """
-        # Different auth endpoints for different registries
-        if registry == DEFAULT_REGISTRY:
-            auth_url = f"{DEFAULT_AUTH_URL}?service=registry.docker.io&scope=repository:{namespace}/{repo}:pull"
-        elif registry in ("ghcr.io", "lscr.io"):
-            # GitHub Container Registry (and lscr.io which delegates auth to ghcr.io)
-            auth_url = f"https://ghcr.io/token?service=ghcr.io&scope=repository:{namespace}/{repo}:pull"
-        else:
-            # Generic registry auth (may need customization)
-            auth_url = f"https://{registry}/v2/auth?service={registry}&scope=repository:{namespace}/{repo}:pull"
-            
+        endpoint = self._discover_auth_endpoint(registry, namespace, repo)
+        if endpoint is None:
+            return None
+
+        realm, service = endpoint
+        scope = f"repository:{namespace}/{repo}:pull"
+        auth_url = (f"{realm}?service={service}&scope={scope}"
+                    if service else f"{realm}?scope={scope}")
+
         try:
             response = self._request_with_retry('GET', auth_url)
             response.raise_for_status()
