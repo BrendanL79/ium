@@ -2,7 +2,7 @@
 
 import pytest
 
-from ium import DockerImageUpdater, DEFAULT_REGISTRY, DEFAULT_NAMESPACE
+from ium import DockerImageUpdater, DEFAULT_REGISTRY, DEFAULT_NAMESPACE, _natural_sort_key
 
 
 # ---------------------------------------------------------------------------
@@ -124,53 +124,49 @@ class TestPlatformStringParsing:
 
 
 class TestTagSorting:
-    """Test the lexicographic sort behavior used by find_matching_tag.
+    """Test the natural sort used by find_matching_tag.
 
-    ium.py uses matching_tags.sort(reverse=True) which is lexicographic.
-    This documents where it works and where it doesn't.
+    ium.py sorts matching tags with key=_natural_sort_key, which compares
+    digit runs numerically.  The old plain lexicographic sort ranked
+    "9.0.3" above "15.0.2" — see the 2026-05-24 forgejo incident and
+    docs/superpowers/specs/2026-06-04-tag-selection-safety-design.md.
     """
 
-    def test_simple_semver_correct(self):
-        """Lex sort works for same-length version components."""
+    @staticmethod
+    def _sorted_desc(tags):
+        return sorted(tags, key=_natural_sort_key, reverse=True)
+
+    def test_simple_semver(self):
         tags = ["4.29.0", "4.30.0", "4.28.0"]
-        tags.sort(reverse=True)
-        assert tags[0] == "4.30.0"
+        assert self._sorted_desc(tags)[0] == "4.30.0"
 
-    def test_simple_semver_incorrect_different_widths(self):
-        """Lex sort FAILS when version components have different digit widths.
-
-        3.10.0 is newer than 3.9.0, but "3.9" > "3.1" lexicographically.
-        This is a known limitation — digest matching makes it cosmetic.
-        """
+    def test_different_digit_widths(self):
+        """3.10.0 > 3.9.0 numerically — the case lexicographic sorting broke."""
         tags = ["3.10.0", "3.9.0", "3.2.0"]
-        tags.sort(reverse=True)
-        # "3.9.0" > "3.10.0" lexicographically because "9" > "1"
-        assert tags.index("3.9.0") < tags.index("3.10.0")
+        assert self._sorted_desc(tags) == ["3.10.0", "3.9.0", "3.2.0"]
+
+    def test_multi_digit_major(self):
+        """The forgejo incident shape: major versions 9 vs 15."""
+        tags = ["9.0.3", "15.0.2", "12.0.1"]
+        assert self._sorted_desc(tags)[0] == "15.0.2"
 
     def test_ls_4part_sort(self):
-        """LS 4-part versions: lex sort works when major.minor.patch grow."""
         tags = ["6.0.4.10291-ls289", "5.27.5.10198-ls284"]
-        tags.sort(reverse=True)
-        assert tags[0] == "6.0.4.10291-ls289"
+        assert self._sorted_desc(tags)[0] == "6.0.4.10291-ls289"
 
     def test_pihole_date_sort(self):
-        """Date-based versions sort correctly lexicographically."""
         tags = ["2025.11.1", "2025.08.0", "2024.07.0"]
-        tags.sort(reverse=True)
-        assert tags[0] == "2025.11.1"
+        assert self._sorted_desc(tags)[0] == "2025.11.1"
 
-    def test_plex_hash_sort_is_meaningless(self):
-        """Plex tags: sort order is arbitrary due to hash suffix.
+    def test_plex_hash_sort(self):
+        """Plex tags: version components dominate; hash suffix only breaks ties.
 
         Digest matching handles correctness regardless of sort order.
         """
         tags = ["1.42.2.10156-f737b826c", "1.42.1.10060-4e8b05daf"]
-        tags.sort(reverse=True)
-        # f7... > 4e... lexicographically, and 1.42.2 > 1.42.1, so this happens to work
-        assert tags[0] == "1.42.2.10156-f737b826c"
+        assert self._sorted_desc(tags)[0] == "1.42.2.10156-f737b826c"
 
     def test_calibre_web_same_version_different_ls(self):
         """Same upstream version, different LS build numbers."""
         tags = ["0.6.25-ls348", "0.6.25-ls345"]
-        tags.sort(reverse=True)
-        assert tags[0] == "0.6.25-ls348"
+        assert self._sorted_desc(tags)[0] == "0.6.25-ls348"

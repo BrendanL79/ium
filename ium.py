@@ -7,7 +7,7 @@ This script monitors Docker images for updates by comparing a base tag
 tags that match user-defined regex patterns.
 """
 
-__version__ = "1.2.3"
+__version__ = "1.2.4"
 
 import json
 import re
@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from contextlib import contextmanager
+from enum import Enum
 import argparse
 import os
 import platform
@@ -57,6 +58,31 @@ MANIFEST_ACCEPT_HEADER = (
     "application/vnd.oci.image.index.v1+json,"
     "application/vnd.oci.image.manifest.v1+json"
 )
+
+
+class DigestStatus(Enum):
+    """Outcome of a manifest digest HEAD request."""
+    OK = "ok"
+    NOT_FOUND = "not_found"   # registry said 404: the tag does not exist
+    ERROR = "error"           # transient/auth/protocol failure: result unknown
+
+
+def _natural_sort_key(tag: str) -> tuple:
+    """Sort key ordering digit runs numerically and text runs lexically.
+
+    "v9.8.0-ls399" -> ((1,'v'), (0,9), (1,'.'), (0,8), (1,'.'), (0,0),
+                       (1,'-ls'), (0,399))
+
+    The (0, int) / (1, str) tagging keeps any two keys mutually comparable
+    (Python 3 raises TypeError on bare int < str), with numbers ordering
+    before text when shapes differ.  Plain lexicographic sorting ranked
+    "9.0.3" above "15.0.2" and downgraded a production forgejo install.
+    """
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in re.split(r'(\d+)', tag)
+        if part
+    )
 
 # Configuration schema
 CONFIG_SCHEMA = {
@@ -598,13 +624,15 @@ class DockerImageUpdater:
             return None
 
     def _get_manifest_digest_head(self, registry: str, namespace: str, repo: str,
-                                   tag: str, token: Optional[str]) -> Optional[str]:
+                                   tag: str, token: Optional[str]
+                                   ) -> Tuple[Optional[str], DigestStatus]:
         """
         Get manifest digest using HEAD request (faster, no body transfer).
 
         Returns the Docker-Content-Digest header which is the digest of the
-        manifest list for multi-arch images, or the manifest itself for single-arch.
-        This is more correct for comparison than parsing manifest list JSON.
+        manifest list for multi-arch images, or the manifest itself for
+        single-arch.  This is more correct for comparison than parsing
+        manifest list JSON.
 
         Args:
             registry: Registry hostname
@@ -614,7 +642,12 @@ class DockerImageUpdater:
             token: Authentication token
 
         Returns:
-            Manifest digest or None
+            (digest, DigestStatus.OK) on success.
+            (None, DigestStatus.NOT_FOUND) when the registry returns 404.
+            (None, DigestStatus.ERROR) on any other failure — 5xx, timeout,
+            connection error, auth failure, or a 200 response missing the
+            Docker-Content-Digest header.  Callers must not treat ERROR as
+            "tag does not exist".
         """
         manifest_url = f"https://{registry}/v2/{namespace}/{repo}/manifests/{tag}"
 
@@ -627,16 +660,26 @@ class DockerImageUpdater:
         try:
             response = self._request_with_retry('HEAD', manifest_url, headers=headers)
             response.raise_for_status()
-            return response.headers.get('Docker-Content-Digest')
+            digest = response.headers.get('Docker-Content-Digest')
+            if not digest:
+                self.logger.debug(
+                    f"No Docker-Content-Digest header for {namespace}/{repo}:{tag}"
+                )
+                return None, DigestStatus.ERROR
+            return digest, DigestStatus.OK
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
                 self.logger.debug(f"Tag not found: {namespace}/{repo}:{tag}")
-            else:
-                self.logger.debug(f"HTTP error getting manifest digest for {namespace}/{repo}:{tag}: {e}")
-            return None
+                return None, DigestStatus.NOT_FOUND
+            self.logger.debug(
+                f"HTTP error getting manifest digest for {namespace}/{repo}:{tag}: {e}"
+            )
+            return None, DigestStatus.ERROR
         except requests.RequestException as e:
-            self.logger.debug(f"Error getting manifest digest for {namespace}/{repo}:{tag}: {e}")
-            return None
+            self.logger.debug(
+                f"Error getting manifest digest for {namespace}/{repo}:{tag}: {e}"
+            )
+            return None, DigestStatus.ERROR
 
     def _get_all_tags(self, registry: str, namespace: str, repo: str, token: Optional[str]) -> List[str]:
         """
@@ -722,7 +765,11 @@ class DockerImageUpdater:
             registry_override: Override registry from config
 
         Returns:
-            Tuple of (matching_tag, digest) or None
+            Tuple of (matching_tag, digest), or None when the result is
+            uncertain (transient registry errors, no digest match) — the
+            caller treats None as "skip this cycle and retry next run".
+            The newest-matching-tag fallback fires only when the base tag
+            genuinely does not exist (HTTP 404).
         """
         # Parse image reference
         registry, namespace, repo = self._parse_image_reference(image)
@@ -733,8 +780,19 @@ class DockerImageUpdater:
         token = self._get_docker_token(registry, namespace, repo)
 
         # Get digest for base tag using HEAD request
-        base_digest = self._get_manifest_digest_head(registry, namespace, repo, base_tag, token)
-        if not base_digest:
+        base_digest, base_status = self._get_manifest_digest_head(
+            registry, namespace, repo, base_tag, token
+        )
+        if base_status is DigestStatus.ERROR:
+            # Transient/auth/protocol failure: we cannot know what the base
+            # tag points at, so guessing is unsafe (2026-05-24 forgejo
+            # incident).  Skip; the next cycle retries.
+            self.logger.warning(
+                f"Transient registry error resolving {image}:{base_tag}; "
+                f"skipping check this cycle"
+            )
+            return None
+        if base_status is DigestStatus.NOT_FOUND:
             self.logger.warning(f"Tag '{base_tag}' not found in registry for {image}")
 
         # Get all available tags
@@ -757,41 +815,54 @@ class DockerImageUpdater:
             self.logger.warning(f"No tags matching pattern '{regex_pattern}'")
             return None
 
-        # Sort tags in reverse order - newest versions typically come last alphabetically
-        # For semver-like tags (v1.2.3), reverse sort puts newest first
-        matching_tags.sort(reverse=True)
+        # Newest first.  Natural sort: digit runs compare numerically, so
+        # 15.0.2 ranks above 9.0.3 (lexicographic sorting got this wrong).
+        matching_tags.sort(key=_natural_sort_key, reverse=True)
 
-        # If we have a base digest, try to find a tag with matching digest
-        if base_digest:
-            # Fetch digests in parallel using HEAD requests
-            def fetch_digest(tag: str) -> Tuple[str, Optional[str]]:
-                digest = self._get_manifest_digest_head(registry, namespace, repo, tag, token)
-                return (tag, digest)
+        if base_status is DigestStatus.OK:
+            # Find the version tag sharing the base tag's digest.
+            def fetch_digest(tag: str) -> Tuple[str, Optional[str], DigestStatus]:
+                digest, status = self._get_manifest_digest_head(
+                    registry, namespace, repo, tag, token
+                )
+                return (tag, digest, status)
 
-            # Use ThreadPoolExecutor for parallel fetching (limit concurrency to be nice to registries)
+            # Use ThreadPoolExecutor for parallel fetching (limit concurrency
+            # to be nice to registries)
             max_workers = min(10, len(matching_tags))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {executor.submit(fetch_digest, tag): tag for tag in matching_tags}
 
                 for future in as_completed(futures):
-                    tag, digest = future.result()
-                    if digest == base_digest:
+                    tag, digest, status = future.result()
+                    if status is DigestStatus.OK and digest == base_digest:
                         # Found a match - cancel remaining futures and return
                         for f in futures:
                             f.cancel()
                         self.logger.debug(f"Found matching tag {tag} with digest {digest[:16]}...")
                         return (tag, base_digest)
 
-            self.logger.warning(f"No tag matching pattern '{regex_pattern}' found with same digest as {base_tag}")
+            # The base tag resolved but nothing matched: either a mid-release
+            # race (registry repointed the base tag before pushing the new
+            # version tag) or transient per-tag failures hid the match.
+            # Both heal by themselves — never guess here.
+            self.logger.warning(
+                f"No tag matching pattern '{regex_pattern}' shares a digest "
+                f"with {image}:{base_tag} (mid-release race or transient "
+                f"registry errors); skipping check this cycle"
+            )
+            return None
 
-        # Fallback: use the latest matching tag when base tag is missing or
-        # its digest doesn't match any version tag
+        # Base tag genuinely does not exist (true 404, e.g. a repo that
+        # publishes only version tags): fall back to the newest matching tag.
         latest_tag = matching_tags[0]
-        latest_digest = self._get_manifest_digest_head(registry, namespace, repo, latest_tag, token)
-        if latest_digest:
+        latest_digest, latest_status = self._get_manifest_digest_head(
+            registry, namespace, repo, latest_tag, token
+        )
+        if latest_status is DigestStatus.OK:
             self.logger.info(
                 f"Using latest matching tag '{latest_tag}' for {image}"
-                f" (base tag '{base_tag}' could not be resolved by digest)"
+                f" (base tag '{base_tag}' does not exist in the registry)"
             )
             return (latest_tag, latest_digest)
 
@@ -1408,6 +1479,23 @@ class DockerImageUpdater:
 
                 # Only report update if tags are actually different
                 if old_tag != matching_tag:
+                    # Downgrade guard: a candidate older than the current
+                    # version is reported but never auto-applied.  Last line
+                    # of defense against bad candidates (2026-05-24 forgejo
+                    # incident); a genuine upstream rollback can still be
+                    # applied manually.
+                    is_downgrade = (
+                        old_tag not in (None, 'unknown')
+                        and _natural_sort_key(matching_tag) < _natural_sort_key(old_tag)
+                    )
+                    if is_downgrade:
+                        self.logger.warning(
+                            f"DOWNGRADE DETECTED: {image} candidate {matching_tag} "
+                            f"is older than current {old_tag}; reporting but not "
+                            f"auto-applying"
+                        )
+                    effective_auto_update = auto_update and not is_downgrade
+
                     self.logger.info(f"UPDATE AVAILABLE: {old_tag} -> {matching_tag}")
 
                     update_info = {
@@ -1416,7 +1504,8 @@ class DockerImageUpdater:
                         'old_tag': old_tag,
                         'new_tag': matching_tag,
                         'digest': digest,
-                        'auto_update': auto_update
+                        'auto_update': effective_auto_update,
+                        'downgrade': is_downgrade
                     }
                     updates_found.append(update_info)
 
@@ -1427,11 +1516,12 @@ class DockerImageUpdater:
                     send_notifications(
                         self.config.get('notifications'),
                         image=image, old_version=old_tag, new_version=matching_tag,
-                        event='update_found', digest=digest, auto_update=auto_update
+                        event='update_found', digest=digest,
+                        auto_update=effective_auto_update
                     )
 
                     update_ok = True
-                    if auto_update:
+                    if effective_auto_update:
                         # Pull the new images
                         if self._pull_image(image, base_tag, registry):
                             self._pull_image(image, matching_tag, registry)

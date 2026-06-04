@@ -13,7 +13,7 @@ Requires network access. May be slow or flaky if registries are down.
 import re
 import pytest
 
-from ium import DockerImageUpdater, DEFAULT_REGISTRY
+from ium import DockerImageUpdater, DigestStatus, DEFAULT_REGISTRY
 from tests.conftest import REGEX_PATTERNS, get_pattern
 
 pytestmark = pytest.mark.live
@@ -143,26 +143,29 @@ class TestDigestFetching:
 
     def test_dockerhub_latest_digest(self, updater):
         token = updater._get_docker_token(DEFAULT_REGISTRY, "linuxserver", "calibre")
-        digest = updater._get_manifest_digest_head(
+        digest, status = updater._get_manifest_digest_head(
             DEFAULT_REGISTRY, "linuxserver", "calibre", "latest", token
         )
+        assert status is DigestStatus.OK
         assert digest is not None
         assert digest.startswith("sha256:")
 
     def test_ghcr_latest_digest(self, updater):
         token = updater._get_docker_token("ghcr.io", "homarr-labs", "homarr")
-        digest = updater._get_manifest_digest_head(
+        digest, status = updater._get_manifest_digest_head(
             "ghcr.io", "homarr-labs", "homarr", "latest", token
         )
+        assert status is DigestStatus.OK
         assert digest is not None
         assert digest.startswith("sha256:")
 
     def test_dockerhub_version_tag_digest(self, updater):
         """Fetch digest for a specific version tag."""
         token = updater._get_docker_token(DEFAULT_REGISTRY, "jellyfin", "jellyfin")
-        digest = updater._get_manifest_digest_head(
+        digest, status = updater._get_manifest_digest_head(
             DEFAULT_REGISTRY, "jellyfin", "jellyfin", "10.11.4", token
         )
+        assert status is DigestStatus.OK
         assert digest is not None
         assert digest.startswith("sha256:")
 
@@ -173,9 +176,10 @@ class TestDigestFetching:
         mechanism works — fetch both and compare. They may or may not match.
         """
         token = updater._get_docker_token(DEFAULT_REGISTRY, "crazymax", "diun")
-        latest_digest = updater._get_manifest_digest_head(
+        latest_digest, latest_status = updater._get_manifest_digest_head(
             DEFAULT_REGISTRY, "crazymax", "diun", "latest", token
         )
+        assert latest_status is DigestStatus.OK
         assert latest_digest is not None
 
         # Get a version tag and its digest
@@ -186,9 +190,10 @@ class TestDigestFetching:
         )
         assert len(version_tags) > 0
 
-        newest_digest = updater._get_manifest_digest_head(
+        newest_digest, newest_status = updater._get_manifest_digest_head(
             DEFAULT_REGISTRY, "crazymax", "diun", version_tags[0], token
         )
+        assert newest_status is DigestStatus.OK
         assert newest_digest is not None
         assert newest_digest.startswith("sha256:")
         # Both are valid digests; they may or may not be equal
