@@ -765,7 +765,11 @@ class DockerImageUpdater:
             registry_override: Override registry from config
 
         Returns:
-            Tuple of (matching_tag, digest) or None
+            Tuple of (matching_tag, digest), or None when the result is
+            uncertain (transient registry errors, no digest match) — the
+            caller treats None as "skip this cycle and retry next run".
+            The newest-matching-tag fallback fires only when the base tag
+            genuinely does not exist (HTTP 404).
         """
         # Parse image reference
         registry, namespace, repo = self._parse_image_reference(image)
@@ -776,8 +780,19 @@ class DockerImageUpdater:
         token = self._get_docker_token(registry, namespace, repo)
 
         # Get digest for base tag using HEAD request
-        base_digest, _base_status = self._get_manifest_digest_head(registry, namespace, repo, base_tag, token)
-        if not base_digest:
+        base_digest, base_status = self._get_manifest_digest_head(
+            registry, namespace, repo, base_tag, token
+        )
+        if base_status is DigestStatus.ERROR:
+            # Transient/auth/protocol failure: we cannot know what the base
+            # tag points at, so guessing is unsafe (2026-05-24 forgejo
+            # incident).  Skip; the next cycle retries.
+            self.logger.warning(
+                f"Transient registry error resolving {image}:{base_tag}; "
+                f"skipping check this cycle"
+            )
+            return None
+        if base_status is DigestStatus.NOT_FOUND:
             self.logger.warning(f"Tag '{base_tag}' not found in registry for {image}")
 
         # Get all available tags
@@ -800,41 +815,54 @@ class DockerImageUpdater:
             self.logger.warning(f"No tags matching pattern '{regex_pattern}'")
             return None
 
-        # Sort tags in reverse order - newest versions typically come last alphabetically
-        # For semver-like tags (v1.2.3), reverse sort puts newest first
-        matching_tags.sort(reverse=True)
+        # Newest first.  Natural sort: digit runs compare numerically, so
+        # 15.0.2 ranks above 9.0.3 (lexicographic sorting got this wrong).
+        matching_tags.sort(key=_natural_sort_key, reverse=True)
 
-        # If we have a base digest, try to find a tag with matching digest
-        if base_digest:
-            # Fetch digests in parallel using HEAD requests
-            def fetch_digest(tag: str) -> Tuple[str, Optional[str]]:
-                digest, _status = self._get_manifest_digest_head(registry, namespace, repo, tag, token)
-                return (tag, digest)
+        if base_status is DigestStatus.OK:
+            # Find the version tag sharing the base tag's digest.
+            def fetch_digest(tag: str) -> Tuple[str, Optional[str], DigestStatus]:
+                digest, status = self._get_manifest_digest_head(
+                    registry, namespace, repo, tag, token
+                )
+                return (tag, digest, status)
 
-            # Use ThreadPoolExecutor for parallel fetching (limit concurrency to be nice to registries)
+            # Use ThreadPoolExecutor for parallel fetching (limit concurrency
+            # to be nice to registries)
             max_workers = min(10, len(matching_tags))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {executor.submit(fetch_digest, tag): tag for tag in matching_tags}
 
                 for future in as_completed(futures):
-                    tag, digest = future.result()
-                    if digest == base_digest:
+                    tag, digest, status = future.result()
+                    if status is DigestStatus.OK and digest == base_digest:
                         # Found a match - cancel remaining futures and return
                         for f in futures:
                             f.cancel()
                         self.logger.debug(f"Found matching tag {tag} with digest {digest[:16]}...")
                         return (tag, base_digest)
 
-            self.logger.warning(f"No tag matching pattern '{regex_pattern}' found with same digest as {base_tag}")
+            # The base tag resolved but nothing matched: either a mid-release
+            # race (registry repointed the base tag before pushing the new
+            # version tag) or transient per-tag failures hid the match.
+            # Both heal by themselves — never guess here.
+            self.logger.warning(
+                f"No tag matching pattern '{regex_pattern}' shares a digest "
+                f"with {image}:{base_tag} (mid-release race or transient "
+                f"registry errors); skipping check this cycle"
+            )
+            return None
 
-        # Fallback: use the latest matching tag when base tag is missing or
-        # its digest doesn't match any version tag
+        # Base tag genuinely does not exist (true 404, e.g. a repo that
+        # publishes only version tags): fall back to the newest matching tag.
         latest_tag = matching_tags[0]
-        latest_digest, _latest_status = self._get_manifest_digest_head(registry, namespace, repo, latest_tag, token)
-        if latest_digest:
+        latest_digest, latest_status = self._get_manifest_digest_head(
+            registry, namespace, repo, latest_tag, token
+        )
+        if latest_status is DigestStatus.OK:
             self.logger.info(
                 f"Using latest matching tag '{latest_tag}' for {image}"
-                f" (base tag '{base_tag}' could not be resolved by digest)"
+                f" (base tag '{base_tag}' does not exist in the registry)"
             )
             return (latest_tag, latest_digest)
 
