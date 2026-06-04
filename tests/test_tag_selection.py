@@ -142,3 +142,114 @@ class TestDigestStatus:
         digest, status = updater._get_manifest_digest_head(*self.URL_ARGS)
         assert digest is None
         assert status is DigestStatus.ERROR
+
+
+FORGEJO_PATTERN = r"^[0-9]+\.[0-9]+\.[0-9]+$"
+
+
+class TestFindMatchingTagDecisionTable:
+    """One test per row of the spec's decision table.
+
+    | Base tag resolution        | Behavior                       |
+    |----------------------------|--------------------------------|
+    | OK + digest match          | return (tag, digest)           |
+    | OK + no match              | None (skip cycle)              |
+    | NOT_FOUND (true 404)       | fallback: newest matching tag  |
+    | ERROR                      | None (skip cycle)              |
+
+    These tests patch the internal helpers, not HTTP: the HTTP-level
+    classification is covered by TestDigestStatus, and the full HTTP path
+    by TestMay24Regression.
+    """
+
+    TAGS = ["latest", "9.0.3", "12.0.1", "15.0.1", "15.0.2"]
+
+    def _setup(self, updater, digest_map):
+        """Wire updater so _get_manifest_digest_head serves from digest_map.
+
+        digest_map: tag -> (digest, DigestStatus); unlisted tags -> NOT_FOUND.
+        """
+        updater._get_docker_token = MagicMock(return_value="tok")
+        updater._get_all_tags = MagicMock(return_value=list(self.TAGS))
+        updater.compiled_patterns[FORGEJO_PATTERN] = re.compile(FORGEJO_PATTERN)
+
+        def head(registry, namespace, repo, tag, token):
+            return digest_map.get(tag, (None, DigestStatus.NOT_FOUND))
+
+        updater._get_manifest_digest_head = MagicMock(side_effect=head)
+
+    def test_base_ok_with_digest_match_returns_it(self, updater):
+        self._setup(updater, {
+            "15": ("sha256:current", DigestStatus.OK),
+            "15.0.2": ("sha256:current", DigestStatus.OK),
+            "15.0.1": ("sha256:older", DigestStatus.OK),
+            "12.0.1": ("sha256:old", DigestStatus.OK),
+            "9.0.3": ("sha256:ancient", DigestStatus.OK),
+        })
+        result = updater.find_matching_tag(
+            "forgejo/forgejo", "15", FORGEJO_PATTERN, "codeberg.org"
+        )
+        assert result == ("15.0.2", "sha256:current")
+
+    def test_base_ok_no_match_skips_cycle(self, updater):
+        # Mid-release race: base repointed, version tag not pushed yet.
+        self._setup(updater, {
+            "15": ("sha256:brand-new", DigestStatus.OK),
+            "15.0.2": ("sha256:current", DigestStatus.OK),
+            "15.0.1": ("sha256:older", DigestStatus.OK),
+            "12.0.1": ("sha256:old", DigestStatus.OK),
+            "9.0.3": ("sha256:ancient", DigestStatus.OK),
+        })
+        result = updater.find_matching_tag(
+            "forgejo/forgejo", "15", FORGEJO_PATTERN, "codeberg.org"
+        )
+        assert result is None  # no guessing; retried next cycle
+
+    def test_base_ok_per_tag_errors_skip_cycle(self, updater):
+        # Per-tag HEADs failed transiently: matches may have been missed.
+        self._setup(updater, {
+            "15": ("sha256:current", DigestStatus.OK),
+            "15.0.2": (None, DigestStatus.ERROR),
+            "15.0.1": (None, DigestStatus.ERROR),
+            "12.0.1": (None, DigestStatus.ERROR),
+            "9.0.3": (None, DigestStatus.ERROR),
+        })
+        result = updater.find_matching_tag(
+            "forgejo/forgejo", "15", FORGEJO_PATTERN, "codeberg.org"
+        )
+        assert result is None
+
+    def test_base_not_found_falls_back_to_natural_newest(self, updater):
+        # True 404 on the base tag: fallback fires, and the natural sort
+        # must pick 15.0.2 — the old lexicographic sort picked 9.0.3.
+        self._setup(updater, {
+            "15": (None, DigestStatus.NOT_FOUND),
+            "15.0.2": ("sha256:current", DigestStatus.OK),
+            "9.0.3": ("sha256:ancient", DigestStatus.OK),
+        })
+        result = updater.find_matching_tag(
+            "forgejo/forgejo", "15", FORGEJO_PATTERN, "codeberg.org"
+        )
+        assert result == ("15.0.2", "sha256:current")
+
+    def test_base_not_found_fallback_digest_error_skips_cycle(self, updater):
+        self._setup(updater, {
+            "15": (None, DigestStatus.NOT_FOUND),
+            "15.0.2": (None, DigestStatus.ERROR),
+        })
+        result = updater.find_matching_tag(
+            "forgejo/forgejo", "15", FORGEJO_PATTERN, "codeberg.org"
+        )
+        assert result is None
+
+    def test_base_error_skips_cycle_before_tag_listing(self, updater):
+        # The May 24 trigger: transient error on the base tag.  Must skip
+        # without even listing tags — there is nothing safe to do.
+        self._setup(updater, {
+            "15": (None, DigestStatus.ERROR),
+        })
+        result = updater.find_matching_tag(
+            "forgejo/forgejo", "15", FORGEJO_PATTERN, "codeberg.org"
+        )
+        assert result is None
+        updater._get_all_tags.assert_not_called()
