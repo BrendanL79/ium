@@ -341,3 +341,38 @@ class TestDowngradeGuard:
         assert updates[0]["downgrade"] is False
         assert updates[0]["auto_update"] is True
         u._pull_image.assert_called()
+
+
+class TestMay24Regression:
+    """Replay of the 2026-05-24 incident, HTTP level.
+
+    forgejo/forgejo tracked with base_tag '15' on codeberg.org; the tag
+    list contains 9.0.3 and 15.0.x; the base-tag HEAD hits a persistent
+    503.  Before the fix: fallback + lexicographic sort selected 9.0.3
+    and 'applied' it.  After: the cycle is skipped, state untouched.
+    """
+
+    @patch("ium.send_notifications")
+    @patch("ium.time.sleep")
+    @patch("ium.requests.request")
+    def test_transient_base_error_skips_cycle(
+        self, mock_request, _sleep, mock_notify, tmp_path
+    ):
+        u = _make_updater(tmp_path, CURRENT_STATE)
+        u._get_docker_token = MagicMock(return_value="tok")
+        u._get_containers_for_image = MagicMock(return_value=[])
+        u._pull_image = MagicMock(return_value=True)
+
+        # HEAD /v2/forgejo/forgejo/manifests/15 -> 503, all 4 attempts.
+        mock_request.side_effect = [_mock_response(503)] * 4
+
+        updates = u.check_and_update()
+
+        assert updates == []
+        mock_notify.assert_not_called()
+        u._pull_image.assert_not_called()
+        # State untouched: still on 15.0.2.
+        assert u.state["forgejo/forgejo"].tag == "15.0.2"
+        assert u.state["forgejo/forgejo"].digest == "sha256:current"
+        # Only the base-tag HEAD was attempted - no tag listing happened.
+        assert all("/manifests/15" in c.args[1] for c in mock_request.call_args_list)
