@@ -29,7 +29,9 @@ Root cause chain:
    "use the latest matching tag".
 3. "Latest" was computed with a plain lexicographic `sort(reverse=True)`,
    and `"9.0.3" > "15.0.2"` as strings. The fallback selected `9.0.3`.
-4. `auto_update: true` applied it: the container was recreated on a v9 image.
+4. `auto_update: true` applied it. (No container existed for the image on
+   the affected host, so only the image/tags were updated — but with a
+   running container this would have recreated it on a v9 image.)
 5. Nothing compared the candidate against the known current version
    (`15.0.2` in state), so the downgrade went unchallenged.
 
