@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from contextlib import contextmanager
+from enum import Enum
 import argparse
 import os
 import platform
@@ -57,6 +58,13 @@ MANIFEST_ACCEPT_HEADER = (
     "application/vnd.oci.image.index.v1+json,"
     "application/vnd.oci.image.manifest.v1+json"
 )
+
+
+class DigestStatus(Enum):
+    """Outcome of a manifest digest HEAD request."""
+    OK = "ok"
+    NOT_FOUND = "not_found"   # registry said 404: the tag does not exist
+    ERROR = "error"           # transient/auth/protocol failure: result unknown
 
 
 def _natural_sort_key(tag: str) -> tuple:
@@ -616,13 +624,15 @@ class DockerImageUpdater:
             return None
 
     def _get_manifest_digest_head(self, registry: str, namespace: str, repo: str,
-                                   tag: str, token: Optional[str]) -> Optional[str]:
+                                   tag: str, token: Optional[str]
+                                   ) -> Tuple[Optional[str], DigestStatus]:
         """
         Get manifest digest using HEAD request (faster, no body transfer).
 
         Returns the Docker-Content-Digest header which is the digest of the
-        manifest list for multi-arch images, or the manifest itself for single-arch.
-        This is more correct for comparison than parsing manifest list JSON.
+        manifest list for multi-arch images, or the manifest itself for
+        single-arch.  This is more correct for comparison than parsing
+        manifest list JSON.
 
         Args:
             registry: Registry hostname
@@ -632,7 +642,12 @@ class DockerImageUpdater:
             token: Authentication token
 
         Returns:
-            Manifest digest or None
+            (digest, DigestStatus.OK) on success.
+            (None, DigestStatus.NOT_FOUND) when the registry returns 404.
+            (None, DigestStatus.ERROR) on any other failure — 5xx, timeout,
+            connection error, auth failure, or a 200 response missing the
+            Docker-Content-Digest header.  Callers must not treat ERROR as
+            "tag does not exist".
         """
         manifest_url = f"https://{registry}/v2/{namespace}/{repo}/manifests/{tag}"
 
@@ -645,16 +660,26 @@ class DockerImageUpdater:
         try:
             response = self._request_with_retry('HEAD', manifest_url, headers=headers)
             response.raise_for_status()
-            return response.headers.get('Docker-Content-Digest')
+            digest = response.headers.get('Docker-Content-Digest')
+            if not digest:
+                self.logger.debug(
+                    f"No Docker-Content-Digest header for {namespace}/{repo}:{tag}"
+                )
+                return None, DigestStatus.ERROR
+            return digest, DigestStatus.OK
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
                 self.logger.debug(f"Tag not found: {namespace}/{repo}:{tag}")
-            else:
-                self.logger.debug(f"HTTP error getting manifest digest for {namespace}/{repo}:{tag}: {e}")
-            return None
+                return None, DigestStatus.NOT_FOUND
+            self.logger.debug(
+                f"HTTP error getting manifest digest for {namespace}/{repo}:{tag}: {e}"
+            )
+            return None, DigestStatus.ERROR
         except requests.RequestException as e:
-            self.logger.debug(f"Error getting manifest digest for {namespace}/{repo}:{tag}: {e}")
-            return None
+            self.logger.debug(
+                f"Error getting manifest digest for {namespace}/{repo}:{tag}: {e}"
+            )
+            return None, DigestStatus.ERROR
 
     def _get_all_tags(self, registry: str, namespace: str, repo: str, token: Optional[str]) -> List[str]:
         """
@@ -751,7 +776,7 @@ class DockerImageUpdater:
         token = self._get_docker_token(registry, namespace, repo)
 
         # Get digest for base tag using HEAD request
-        base_digest = self._get_manifest_digest_head(registry, namespace, repo, base_tag, token)
+        base_digest, _base_status = self._get_manifest_digest_head(registry, namespace, repo, base_tag, token)
         if not base_digest:
             self.logger.warning(f"Tag '{base_tag}' not found in registry for {image}")
 
@@ -783,7 +808,7 @@ class DockerImageUpdater:
         if base_digest:
             # Fetch digests in parallel using HEAD requests
             def fetch_digest(tag: str) -> Tuple[str, Optional[str]]:
-                digest = self._get_manifest_digest_head(registry, namespace, repo, tag, token)
+                digest, _status = self._get_manifest_digest_head(registry, namespace, repo, tag, token)
                 return (tag, digest)
 
             # Use ThreadPoolExecutor for parallel fetching (limit concurrency to be nice to registries)
@@ -805,7 +830,7 @@ class DockerImageUpdater:
         # Fallback: use the latest matching tag when base tag is missing or
         # its digest doesn't match any version tag
         latest_tag = matching_tags[0]
-        latest_digest = self._get_manifest_digest_head(registry, namespace, repo, latest_tag, token)
+        latest_digest, _latest_status = self._get_manifest_digest_head(registry, namespace, repo, latest_tag, token)
         if latest_digest:
             self.logger.info(
                 f"Using latest matching tag '{latest_tag}' for {image}"
