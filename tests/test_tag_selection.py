@@ -253,3 +253,91 @@ class TestFindMatchingTagDecisionTable:
         )
         assert result is None
         updater._get_all_tags.assert_not_called()
+
+
+def _make_updater(tmp_path, state):
+    """Updater with the forgejo config and the given persisted state dict."""
+    config = {
+        "images": [{
+            "image": "forgejo/forgejo",
+            "regex": FORGEJO_PATTERN,
+            "base_tag": "15",
+            "registry": "codeberg.org",
+            "auto_update": True,
+            "cleanup_old_images": False,
+        }]
+    }
+    config_file = tmp_path / "config.json"
+    state_file = tmp_path / "state.json"
+    config_file.write_text(json.dumps(config))
+    state_file.write_text(json.dumps(state))
+    return DockerImageUpdater(str(config_file), str(state_file))
+
+
+CURRENT_STATE = {
+    "forgejo/forgejo": {
+        "base_tag": "15",
+        "tag": "15.0.2",
+        "digest": "sha256:current",
+        "last_updated": "2026-05-24T00:00:00",
+    }
+}
+
+
+class TestDowngradeGuard:
+    """A candidate older than the current version is reported, never applied."""
+
+    @patch("ium.send_notifications")
+    def test_downgrade_reported_but_not_applied(self, mock_notify, tmp_path):
+        u = _make_updater(tmp_path, CURRENT_STATE)
+        u.find_matching_tag = MagicMock(return_value=("9.0.3", "sha256:ancient"))
+        u._get_containers_for_image = MagicMock(return_value=[])
+        u._pull_image = MagicMock(return_value=True)
+
+        updates = u.check_and_update()
+
+        assert len(updates) == 1
+        info = updates[0]
+        assert info["new_tag"] == "9.0.3"
+        assert info["downgrade"] is True
+        # Effective auto_update is off: webui history derives
+        # applied=... from this field.
+        assert info["auto_update"] is False
+        u._pull_image.assert_not_called()
+        # State still moves (existing convention: prevents hourly
+        # re-notification; a bogus candidate self-heals next cycle).
+        assert u.state["forgejo/forgejo"].tag == "9.0.3"
+        # Notification still goes out, marked not-auto-applied.
+        assert mock_notify.call_args.kwargs["auto_update"] is False
+
+    @patch("ium.send_notifications")
+    def test_upgrade_applies_normally(self, mock_notify, tmp_path):
+        u = _make_updater(tmp_path, CURRENT_STATE)
+        u.find_matching_tag = MagicMock(return_value=("15.0.3", "sha256:new"))
+        u._get_containers_for_image = MagicMock(return_value=[])
+        u._pull_image = MagicMock(return_value=True)
+
+        updates = u.check_and_update()
+
+        assert len(updates) == 1
+        info = updates[0]
+        assert info["downgrade"] is False
+        assert info["auto_update"] is True
+        u._pull_image.assert_called()
+        assert u.state["forgejo/forgejo"].tag == "15.0.3"
+
+    @patch("ium.send_notifications")
+    def test_unknown_old_tag_is_not_blocked(self, mock_notify, tmp_path):
+        # No state and no containers -> old_tag == 'unknown': nothing to
+        # compare against, guard must not fire.
+        u = _make_updater(tmp_path, {})
+        u.find_matching_tag = MagicMock(return_value=("9.0.3", "sha256:ancient"))
+        u._get_containers_for_image = MagicMock(return_value=[])
+        u._pull_image = MagicMock(return_value=True)
+
+        updates = u.check_and_update()
+
+        assert len(updates) == 1
+        assert updates[0]["downgrade"] is False
+        assert updates[0]["auto_update"] is True
+        u._pull_image.assert_called()
