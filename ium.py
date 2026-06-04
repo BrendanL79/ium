@@ -1479,6 +1479,23 @@ class DockerImageUpdater:
 
                 # Only report update if tags are actually different
                 if old_tag != matching_tag:
+                    # Downgrade guard: a candidate older than the current
+                    # version is reported but never auto-applied.  Last line
+                    # of defense against bad candidates (2026-05-24 forgejo
+                    # incident); a genuine upstream rollback can still be
+                    # applied manually.
+                    is_downgrade = (
+                        old_tag not in (None, 'unknown')
+                        and _natural_sort_key(matching_tag) < _natural_sort_key(old_tag)
+                    )
+                    if is_downgrade:
+                        self.logger.warning(
+                            f"DOWNGRADE DETECTED: {image} candidate {matching_tag} "
+                            f"is older than current {old_tag}; reporting but not "
+                            f"auto-applying"
+                        )
+                    effective_auto_update = auto_update and not is_downgrade
+
                     self.logger.info(f"UPDATE AVAILABLE: {old_tag} -> {matching_tag}")
 
                     update_info = {
@@ -1487,7 +1504,8 @@ class DockerImageUpdater:
                         'old_tag': old_tag,
                         'new_tag': matching_tag,
                         'digest': digest,
-                        'auto_update': auto_update
+                        'auto_update': effective_auto_update,
+                        'downgrade': is_downgrade
                     }
                     updates_found.append(update_info)
 
@@ -1498,11 +1516,12 @@ class DockerImageUpdater:
                     send_notifications(
                         self.config.get('notifications'),
                         image=image, old_version=old_tag, new_version=matching_tag,
-                        event='update_found', digest=digest, auto_update=auto_update
+                        event='update_found', digest=digest,
+                        auto_update=effective_auto_update
                     )
 
                     update_ok = True
-                    if auto_update:
+                    if effective_auto_update:
                         # Pull the new images
                         if self._pull_image(image, base_tag, registry):
                             self._pull_image(image, matching_tag, registry)
