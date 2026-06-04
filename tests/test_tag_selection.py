@@ -15,7 +15,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import requests
 
-from ium import DockerImageUpdater, _natural_sort_key
+from ium import DockerImageUpdater, DigestStatus, _natural_sort_key
 
 
 @pytest.fixture
@@ -80,3 +80,65 @@ class TestNaturalSortKey:
         tags = ["latest", "15.0.2", "v2", "2025.11.1"]
         sorted(tags, key=_natural_sort_key)  # no exception
         assert _natural_sort_key("latest") != _natural_sort_key("15.0.2")
+
+
+class TestDigestStatus:
+    """_get_manifest_digest_head returns (digest, status) and classifies failures.
+
+    404 -> NOT_FOUND (the tag does not exist; fallback is legitimate).
+    Everything else -> ERROR (transient/auth/protocol; result unknown).
+    """
+
+    URL_ARGS = ("codeberg.org", "forgejo", "forgejo", "15", "tok")
+
+    @patch("ium.requests.request")
+    def test_success_returns_digest_and_ok(self, mock_request, updater):
+        mock_request.return_value = _mock_response(
+            200, headers={"Docker-Content-Digest": "sha256:abc"}
+        )
+        digest, status = updater._get_manifest_digest_head(*self.URL_ARGS)
+        assert digest == "sha256:abc"
+        assert status is DigestStatus.OK
+
+    @patch("ium.requests.request")
+    def test_404_is_not_found(self, mock_request, updater):
+        mock_request.return_value = _mock_response(404)
+        digest, status = updater._get_manifest_digest_head(*self.URL_ARGS)
+        assert digest is None
+        assert status is DigestStatus.NOT_FOUND
+
+    @patch("ium.time.sleep")
+    @patch("ium.requests.request")
+    def test_persistent_503_is_error(self, mock_request, _sleep, updater):
+        # _request_with_retry tries 4 times (initial + 3 retries) then
+        # returns the failing response; raise_for_status -> HTTPError(503).
+        mock_request.side_effect = [_mock_response(503)] * 4
+        digest, status = updater._get_manifest_digest_head(*self.URL_ARGS)
+        assert digest is None
+        assert status is DigestStatus.ERROR
+        assert mock_request.call_count == 4
+
+    @patch("ium.time.sleep")
+    @patch("ium.requests.request")
+    def test_connection_error_is_error(self, mock_request, _sleep, updater):
+        mock_request.side_effect = requests.ConnectionError("boom")
+        digest, status = updater._get_manifest_digest_head(*self.URL_ARGS)
+        assert digest is None
+        assert status is DigestStatus.ERROR
+
+    @patch("ium.requests.request")
+    def test_401_is_error_not_not_found(self, mock_request, updater):
+        # Expired/invalid token must not look like a missing tag.
+        mock_request.return_value = _mock_response(401)
+        digest, status = updater._get_manifest_digest_head(*self.URL_ARGS)
+        assert digest is None
+        assert status is DigestStatus.ERROR
+
+    @patch("ium.requests.request")
+    def test_200_without_digest_header_is_error(self, mock_request, updater):
+        # A 200 missing Docker-Content-Digest previously looked identical
+        # to "tag not found".  It is a protocol anomaly: ERROR.
+        mock_request.return_value = _mock_response(200, headers={})
+        digest, status = updater._get_manifest_digest_head(*self.URL_ARGS)
+        assert digest is None
+        assert status is DigestStatus.ERROR
