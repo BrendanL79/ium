@@ -58,6 +58,24 @@ MANIFEST_ACCEPT_HEADER = (
     "application/vnd.oci.image.manifest.v1+json"
 )
 
+
+def _natural_sort_key(tag: str) -> tuple:
+    """Sort key ordering digit runs numerically and text runs lexically.
+
+    "v9.8.0-ls399" -> ((1,'v'), (0,9), (1,'.'), (0,8), (1,'.'), (0,0),
+                       (1,'-ls'), (0,399))
+
+    The (0, int) / (1, str) tagging keeps any two keys mutually comparable
+    (Python 3 raises TypeError on bare int < str), with numbers ordering
+    before text when shapes differ.  Plain lexicographic sorting ranked
+    "9.0.3" above "15.0.2" and downgraded a production forgejo install.
+    """
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in re.split(r'(\d+)', tag)
+        if part
+    )
+
 # Configuration schema
 CONFIG_SCHEMA = {
     "type": "object",
