@@ -69,6 +69,9 @@ jobs:
             org.opencontainers.image.version=${{ steps.version.outputs.VERSION }}
 
       - name: Update Docker Hub description
+        # Best-effort: a 403 here (e.g. token lacks repo-edit scope) must not
+        # fail the release or skip the GitHub Release step that follows.
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
