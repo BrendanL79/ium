@@ -147,10 +147,10 @@ async function loadStatus() {
 
         // Update mode indicator
         if (data.dry_run) {
-            dom.modeIndicator.textContent = 'DRY RUN MODE';
+            dom.modeIndicator.textContent = 'DRY RUN';
             dom.modeIndicator.className = 'mode dry-run';
         } else {
-            dom.modeIndicator.textContent = 'PRODUCTION MODE';
+            dom.modeIndicator.textContent = 'PRODUCTION';
             dom.modeIndicator.className = 'mode production';
         }
 
@@ -174,7 +174,7 @@ async function loadStatus() {
 // Update last check time
 function updateLastCheck(timestamp) {
     const date = new Date(timestamp);
-    dom.lastCheck.textContent = 'Last check: ' + date.toLocaleString();
+    dom.lastCheck.textContent = date.toLocaleString();
 }
 
 // Update daemon button state
@@ -184,13 +184,13 @@ function updateDaemonButton() {
         dom.toggleDaemon.classList.add('btn-danger');
         dom.toggleDaemon.classList.remove('btn-secondary');
         dom.daemonIndicator.classList.add('connected');
-        dom.daemonStatusText.textContent = 'Daemon: Running';
+        dom.daemonStatusText.textContent = 'Running';
     } else {
         dom.toggleDaemon.textContent = 'Start Daemon';
         dom.toggleDaemon.classList.remove('btn-danger');
         dom.toggleDaemon.classList.add('btn-secondary');
         dom.daemonIndicator.classList.remove('connected');
-        dom.daemonStatusText.textContent = 'Daemon: Stopped';
+        dom.daemonStatusText.textContent = 'Stopped';
     }
 }
 

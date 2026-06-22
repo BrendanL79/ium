@@ -3,23 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image Update Manager</title>
+    <title>ium — Image Update Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>Image Update Manager</h1>
-            <div class="status-bar">
-                <span id="status-indicator" class="status-dot"></span>
-                <span id="status-text">Disconnected</span>
-                <span id="mode-indicator" class="mode"></span>
-                <span class="daemon-status">
-                    <span id="daemon-indicator" class="status-dot"></span>
-                    <span id="daemon-status-text">Daemon: Stopped</span>
-                </span>
-                <span id="last-check"></span>
+        <header class="titleblock">
+            <div class="tb-brand">
+                <div class="tb-wordmark">ium</div>
+                <div class="tb-sub">Image Update Manager</div>
+            </div>
+            <div class="tb-meta">
+                <div class="tb-cell">
+                    <span class="tb-label">Link</span>
+                    <span class="tb-value">
+                        <span id="status-indicator" class="status-dot"></span>
+                        <span id="status-text">Disconnected</span>
+                    </span>
+                </div>
+                <div class="tb-cell">
+                    <span class="tb-label">Daemon</span>
+                    <span class="tb-value">
+                        <span id="daemon-indicator" class="status-dot"></span>
+                        <span id="daemon-status-text">Stopped</span>
+                    </span>
+                </div>
+                <div class="tb-cell">
+                    <span class="tb-label">Mode</span>
+                    <span class="tb-value"><span id="mode-indicator" class="mode"></span></span>
+                </div>
+                <div class="tb-cell">
+                    <span class="tb-label">Last Scan</span>
+                    <span class="tb-value" id="last-check">&mdash;</span>
+                </div>
                 <button id="theme-toggle" class="btn-icon btn-theme-toggle" title="Toggle dark/light mode" aria-label="Toggle theme">&#9681;</button>
             </div>
         </header>
@@ -144,6 +164,7 @@
 
         <footer class="app-footer">
             <span id="app-version">ium</span>
+            <span>Blueprint &middot; Image Update Manager</span>
         </footer>
     </div>
 
