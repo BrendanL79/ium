@@ -7,7 +7,7 @@ This script monitors Docker images for updates by comparing a base tag
 tags that match user-defined regex patterns.
 """
 
-__version__ = "1.2.4"
+__version__ = "1.3.0"
 
 import json
 import re
